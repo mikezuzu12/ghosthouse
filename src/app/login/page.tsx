@@ -59,13 +59,13 @@ export default function LoginPage() {
         {/* Form */}
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium text-gray-700 block mb-1">
+            <label className="text-sm font-medium text-gray-700 block mb-1 ">
               Email address
             </label>
             <input
               type="email"
               placeholder="you@example.com"
-              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50"
+              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 text-black"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               onKeyDown={(e) => e.key === "Enter" && handleLogin()}

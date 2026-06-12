@@ -17,33 +17,37 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
+ const handleRegister = async (e: React.FormEvent) => {
+  e.preventDefault();
 
-    if (password !== confirmPassword) {
-      alert("Passwords do not match");
-      return;
-    }
-
-    // Temporary registration logic
-    const newUser = {
-      role,
-      fullName,
+  const res = await fetch("/api/register", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      full_name: fullName,
       email,
       phone,
-      address,
-      licenseNumber,
-      vehicleType,
-      vehicleReg,
       password,
-    };
+      role,
+      address,
+      license_number: licenseNumber,
+      vehicle_type: vehicleType,
+      vehicle_registration: vehicleReg,
+    }),
+  });
 
-    console.log("Registered User:", newUser);
+  const data = await res.json();
 
-    alert("Registration successful!");
+  if (!res.ok) {
+    alert(data.error);
+    return;
+  }
 
-    router.push("/login");
-  };
+  alert("Registration successful!");
+  router.push("/login");
+};
 
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
@@ -159,7 +163,7 @@ export default function RegisterPage() {
 
                 <input
                   type="text"
-                  className="w-full border p-3 rounded"
+                  className="w-full border p-3 rounded text-black"
                   placeholder="Enter vehicle type"
                   value={vehicleType}
                   onChange={(e) => setVehicleType(e.target.value)}
@@ -168,13 +172,13 @@ export default function RegisterPage() {
               </div>
 
               <div className="mb-4">
-                <label className="block font-medium mb-2">
+                <label className="block font-medium mb-2 text-black">
                   Vehicle Registration
                 </label>
 
                 <input
                   type="text"
-                  className="w-full border p-3 rounded"
+                  className="w-full border p-3 rounded text-black"
                   placeholder="Enter vehicle registration"
                   value={vehicleReg}
                   onChange={(e) => setVehicleReg(e.target.value)}
