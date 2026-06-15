@@ -34,11 +34,41 @@ export default function OrderPage() {
   const total = cartItems.reduce((sum, p) => sum + p.price * cart[p.id], 0);
   const itemCount = Object.values(cart).reduce((a, b) => a + b, 0);
 
-  function handleSubmit() {
-    if (!form.name || !form.email || !form.address) return alert("Please fill in all fields.");
-    if (cartItems.length === 0) return alert("Your cart is empty.");
+  async function handleSubmit() {
+  if (!form.name || !form.email || !form.address)
+    return alert("Please fill in all fields.");
+  if (cartItems.length === 0)
+    return alert("Your cart is empty.");
+
+  const orderItems = cartItems.map((p) => ({
+    id: p.id,
+    name: p.name,
+    quantity: cart[p.id],
+    price: p.price,
+  }));
+
+  try {
+    const res = await fetch("/api/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        address: form.address,
+        items: orderItems,
+        total: total.toFixed(2),
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
     setSubmitted(true);
+  } catch (err) {
+    alert("Something went wrong. Please try again.");
+    console.error(err);
   }
+}
 
   if (submitted) {
     return (
@@ -98,7 +128,7 @@ export default function OrderPage() {
                 <div>
                   <p className="font-medium text-gray-800">{product.name}</p>
                   <p className="text-sm text-gray-400">{product.description}</p>
-                  <p className="text-blue-600 font-semibold mt-1">${product.price.toFixed(2)}</p>
+                  <p className="text-blue-600 font-semibold mt-1">R{product.price.toFixed(2)}</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <button
@@ -128,14 +158,14 @@ export default function OrderPage() {
                   {cartItems.map((p) => (
                     <li key={p.id} className="flex justify-between text-sm text-gray-600">
                       <span>{p.name} × {cart[p.id]}</span>
-                      <span>${(p.price * cart[p.id]).toFixed(2)}</span>
+                      <span>R{(p.price * cart[p.id]).toFixed(2)}</span>
                     </li>
                   ))}
                 </ul>
               )}
               <div className="border-t border-blue-50 pt-3 flex justify-between font-semibold text-gray-800">
                 <span>Total</span>
-                <span className="text-blue-600">${total.toFixed(2)}</span>
+                <span className="text-blue-600">R{total.toFixed(2)}</span>
               </div>
             </div>
 

@@ -11,10 +11,10 @@ const handler = NextAuth({
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
+
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        // Look up user in your Supabase users table
         const { data: user, error } = await supabase
           .from("users")
           .select("*")
@@ -23,17 +23,16 @@ const handler = NextAuth({
 
         if (error || !user) return null;
 
-        // Check password — assumes passwords are hashed with bcrypt
         const passwordMatch = await bcrypt.compare(
           credentials.password,
-          user.password
+          user.password_hash
         );
 
         if (!passwordMatch) return null;
 
         return {
           id: user.id,
-          name: user.name,
+          name: user.full_name,
           email: user.email,
           role: user.role,
         };
@@ -41,16 +40,21 @@ const handler = NextAuth({
     }),
   ],
 
+  session: {
+    strategy: "jwt",
+  },
+
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
-        token.role = (user as any).role;
+        token.role = (user as any).role; // IMPORTANT FIX
       }
       return token;
     },
+
     async session({ session, token }) {
-      if (token) {
+      if (session.user) {
         session.user.id = token.id as string;
         (session.user as any).role = token.role;
       }
@@ -60,10 +64,6 @@ const handler = NextAuth({
 
   pages: {
     signIn: "/login",
-  },
-
-  session: {
-    strategy: "jwt",
   },
 
   secret: process.env.NEXTAUTH_SECRET,

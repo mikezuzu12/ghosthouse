@@ -1,31 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-
-type OrderItem = {
-  id: number;
-  name: string;
-  quantity: number;
-  price: number;
-};
-
-type Order = {
-  id: number;
-  name: string;
-  email: string;
-  phone: string;
-  address: string;
-  items: OrderItem[];
-  total: number;
-  status: string;
-  created_at: string;
-};
-
-const orders: Order[] = [];
-let nextId = 1;
+import { supabase } from "@/lib/supabase";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { name, email, phone, address, items, total } = body;
+    const { name, email, phone, address, items, total } = await req.json();
 
     if (!name || !email || !address || !items || !total) {
       return NextResponse.json(
@@ -34,33 +12,44 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const newOrder: Order = {
-      id: nextId++,
-      name,
-      email,
-      phone,
-      address,
-      items,
-      total,
-      status: "pending",
-      created_at: new Date().toISOString(),
-    };
+    const { data, error } = await supabase
+      .from("orders")
+      .insert([
+        {
+          customer_name: name,
+          customer_email: email,
+          customer_phone: phone,
+          delivery_address: address,
+          items,
+          total,
+        },
+      ])
+      .select()
+      .single();
 
-    orders.push(newOrder);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
+    return NextResponse.json({ success: true, order: data }, { status: 201 });
+  } catch (err) {
+    console.error("Order error:", err);
     return NextResponse.json(
-      { success: true, order: newOrder },
-      { status: 201 }
-    );
-  } catch (error) {
-    console.error("Order error:", error);
-    return NextResponse.json(
-      { error: "Failed to save order" },
+      { error: "Something went wrong." },
       { status: 500 }
     );
   }
 }
 
 export async function GET() {
-  return NextResponse.json({ orders });
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ orders: data });
 }
