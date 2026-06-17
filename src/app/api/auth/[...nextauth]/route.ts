@@ -3,7 +3,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { supabase } from "@/lib/supabase";
 import bcrypt from "bcryptjs";
 
-const handler = NextAuth({
+export const authOptions = {
   providers: [
     CredentialsProvider({
       name: "credentials",
@@ -11,7 +11,6 @@ const handler = NextAuth({
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
@@ -19,7 +18,7 @@ const handler = NextAuth({
           .from("users")
           .select("*")
           .eq("email", credentials.email)
-          .single();
+          .maybeSingle();
 
         if (error || !user) return null;
 
@@ -31,7 +30,7 @@ const handler = NextAuth({
         if (!passwordMatch) return null;
 
         return {
-          id: user.id,
+          id: String(user.id),
           name: user.full_name,
           email: user.email,
           role: user.role,
@@ -40,23 +39,18 @@ const handler = NextAuth({
     }),
   ],
 
-  session: {
-    strategy: "jwt",
-  },
-
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user }: any) {
       if (user) {
         token.id = user.id;
-        token.role = (user as any).role; // IMPORTANT FIX
+        token.role = user.role;
       }
       return token;
     },
-
-    async session({ session, token }) {
-      if (session.user) {
-        session.user.id = token.id as string;
-        (session.user as any).role = token.role;
+    async session({ session, token }: any) {
+      if (token) {
+        session.user.id = token.id;
+        session.user.role = token.role;
       }
       return session;
     },
@@ -66,7 +60,12 @@ const handler = NextAuth({
     signIn: "/login",
   },
 
-  secret: process.env.NEXTAUTH_SECRET,
-});
+  session: {
+    strategy: "jwt" as const,
+  },
 
+  secret: process.env.NEXTAUTH_SECRET,
+};
+
+const handler = NextAuth(authOptions);
 export { handler as GET, handler as POST };

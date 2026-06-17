@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status") || "available";
 
-  // Map tab name to actual delivery_status value in database
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const driverId = session.user.id;
+
   const statusMap: Record<string, string> = {
     available: "unclaimed",
     claimed: "claimed",
@@ -14,32 +22,38 @@ export async function GET(req: NextRequest) {
 
   const deliveryStatus = statusMap[status] || "unclaimed";
 
-  const { data: orders, error } = await supabase
+  let query = supabase
     .from("orders")
     .select("*")
-    .eq("delivery_status", deliveryStatus)
     .order("created_at", { ascending: false });
 
+  if (status === "available") {
+    query = query.eq("delivery_status", "unclaimed");
+  } else {
+    query = query
+      .eq("delivery_status", deliveryStatus)
+      .eq("driver_id", driverId);
+  }
+
+  const { data: orders, error } = await query;
+
   if (error) {
-    console.error("Supabase error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Get counts for all statuses for the stats bar
   const [available, claimed, delivered] = await Promise.all([
-    supabase
-      .from("orders")
-      .select("*", { count: "exact", head: true })
-      .eq("delivery_status", "unclaimed"),
-    supabase
-      .from("orders")
-      .select("*", { count: "exact", head: true })
-      .eq("delivery_status", "claimed"),
-    supabase
-      .from("orders")
-      .select("*", { count: "exact", head: true })
-      .eq("delivery_status", "delivered"),
+    supabase.from("orders").select("*", { count: "exact", head: true }).eq("delivery_status", "unclaimed"),
+    supabase.from("orders").select("*", { count: "exact", head: true }).eq("delivery_status", "claimed").eq("driver_id", driverId),
+    supabase.from("orders").select("*", { count: "exact", head: true }).eq("delivery_status", "delivered").eq("driver_id", driverId),
   ]);
+
+  const { data: deliveredOrders } = await supabase
+    .from("orders")
+    .select("total")
+    .eq("delivery_status", "delivered")
+    .eq("driver_id", driverId);
+
+  const totalEarnings = deliveredOrders?.reduce((sum, o) => sum + Number(o.total), 0) ?? 0;
 
   return NextResponse.json({
     orders,
@@ -47,6 +61,7 @@ export async function GET(req: NextRequest) {
       available: available.count ?? 0,
       claimed: claimed.count ?? 0,
       delivered: delivered.count ?? 0,
+      totalEarnings: totalEarnings.toFixed(2),
     },
   });
 }

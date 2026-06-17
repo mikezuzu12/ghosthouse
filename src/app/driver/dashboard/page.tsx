@@ -1,9 +1,18 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import OrderChat from "@/app/components/OrderChat";
+import dynamic from 'next/dynamic';
+import DriverLocationTracker from "@/app/components/DriverLocationTracker";
+
+// Dynamically import map to avoid SSR issues
+const MapComponent = dynamic(
+  () => import('@/app/components/LiveMap'),
+  { ssr: false, loading: () => <div className="h-[300px] bg-gray-100 rounded-xl animate-pulse" /> }
+);
 
 type Order = {
   id: string;
@@ -33,17 +42,29 @@ type Notification = {
   type: "success" | "error" | "info";
 };
 
+type Location = {
+  id: string;
+  driver_id: number;
+  driver_name: string;
+  order_id: string;
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  status: 'active' | 'idle' | 'offline';
+  updated_at: string;
+};
+
 export default function DriverDashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
   const [tab, setTab] = useState<"available" | "claimed" | "delivered">("available");
   const [orders, setOrders] = useState<Order[]>([]);
-  const [stats, setStats] = useState<Stats>({ 
-    available: 0, 
-    claimed: 0, 
+  const [stats, setStats] = useState<Stats>({
+    available: 0,
+    claimed: 0,
     delivered: 0,
-    totalEarnings: 0 
+    totalEarnings: 0,
   });
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState<string | null>(null);
@@ -53,6 +74,10 @@ export default function DriverDashboard() {
   const [showDetails, setShowDetails] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [chatOrderId, setChatOrderId] = useState<string | null>(null);
+  const [showTracking, setShowTracking] = useState<string | null>(null);
+  const [driverLocation, setDriverLocation] = useState<Location | null>(null);
+  const [loadingLocation, setLoadingLocation] = useState(false);
 
   // Real-time clock
   useEffect(() => {
@@ -83,11 +108,44 @@ export default function DriverDashboard() {
     return () => clearInterval(interval);
   }, [tab, status]);
 
+  // Fetch driver location when tracking is opened
+  useEffect(() => {
+    if (!showTracking) {
+      setDriverLocation(null);
+      return;
+    }
+
+    setLoadingLocation(true);
+    fetch(`/api/driver/location?order_id=${showTracking}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.location) {
+          setDriverLocation(data.location);
+        }
+        setLoadingLocation(false);
+      })
+      .catch(() => setLoadingLocation(false));
+
+    // Poll for location updates every 5 seconds
+    const interval = setInterval(() => {
+      fetch(`/api/driver/location?order_id=${showTracking}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.location) {
+            setDriverLocation(data.location);
+          }
+        })
+        .catch(console.error);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [showTracking]);
+
   const addNotification = (message: string, type: "success" | "error" | "info") => {
     const id = Date.now().toString();
-    setNotifications(prev => [...prev, { id, message, type }]);
+    setNotifications((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== id));
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
     }, 5000);
   };
 
@@ -98,7 +156,6 @@ export default function DriverDashboard() {
       const data = await res.json();
 
       if (!res.ok) {
-        console.error("Fetch error:", data);
         addNotification("Failed to fetch orders", "error");
         return;
       }
@@ -106,7 +163,6 @@ export default function DriverDashboard() {
       setOrders(data.orders || []);
       setStats(data.stats || { available: 0, claimed: 0, delivered: 0, totalEarnings: 0 });
     } catch (err) {
-      console.error("Failed to fetch orders:", err);
       addNotification("Network error fetching orders", "error");
     } finally {
       setLoading(false);
@@ -125,7 +181,6 @@ export default function DriverDashboard() {
         addNotification(error.error || "Failed to claim order", "error");
       }
     } catch (err) {
-      console.error(err);
       addNotification("Failed to claim order", "error");
     } finally {
       setClaiming(null);
@@ -139,22 +194,26 @@ export default function DriverDashboard() {
       if (res.ok) {
         await fetchOrders();
         addNotification("Order delivered! Great job! ✅", "success");
+        // Close chat if this order was being chatted
+        if (chatOrderId === id) setChatOrderId(null);
+        // Close tracking if this order was being tracked
+        if (showTracking === id) setShowTracking(null);
       } else {
         const error = await res.json();
         addNotification(error.error || "Failed to mark as delivered", "error");
       }
     } catch (err) {
-      console.error(err);
       addNotification("Failed to complete order", "error");
     } finally {
       setCompleting(null);
     }
   }
 
-  const filteredOrders = orders.filter(order => 
-    order.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    order.delivery_address?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    order.id.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredOrders = orders.filter(
+    (order) =>
+      order.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.delivery_address?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.id.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const getGreeting = () => {
@@ -186,17 +245,21 @@ export default function DriverDashboard() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
+
       {/* Notifications */}
       <AnimatePresence>
-        {notifications.map(notification => (
+        {notifications.map((notification) => (
           <motion.div
             key={notification.id}
             initial={{ x: 300, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 300, opacity: 0 }}
             className={`fixed top-20 right-4 z-50 p-4 rounded-xl shadow-lg ${
-              notification.type === "success" ? "bg-green-500" :
-              notification.type === "error" ? "bg-red-500" : "bg-blue-500"
+              notification.type === "success"
+                ? "bg-green-500"
+                : notification.type === "error"
+                ? "bg-red-500"
+                : "bg-blue-500"
             } text-white min-w-[250px]`}
           >
             {notification.message}
@@ -204,7 +267,7 @@ export default function DriverDashboard() {
         ))}
       </AnimatePresence>
 
-      {/* Modern Navbar */}
+      {/* Navbar */}
       <nav className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-gray-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
@@ -214,10 +277,12 @@ export default function DriverDashboard() {
               </div>
               <div>
                 <h1 className="font-bold text-gray-800">AquaPure Driver Portal</h1>
-                <p className="text-xs text-gray-500">{getGreeting()}, {session?.user?.name?.split(" ")[0]}</p>
+                <p className="text-xs text-gray-500">
+                  {getGreeting()}, {session?.user?.name?.split(" ")[0]}
+                </p>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-4">
               <div className="hidden md:block text-right">
                 <p className="text-xs text-gray-500">{currentTime.toLocaleDateString()}</p>
@@ -225,7 +290,7 @@ export default function DriverDashboard() {
               </div>
               <button
                 onClick={() => signOut({ callbackUrl: "/login" })}
-                className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl transition shadow-md hover:shadow-lg"
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl transition shadow-md"
               >
                 <span>🚪</span>
                 <span className="hidden sm:inline">Logout</span>
@@ -236,7 +301,7 @@ export default function DriverDashboard() {
       </nav>
 
       <div className="max-w-7xl mx-auto px-6 py-8">
-        
+
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           {[
@@ -272,11 +337,10 @@ export default function DriverDashboard() {
                 placeholder="🔍 Search by customer name, address, or order ID..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full px-4 py-3 pl-10 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            
-            {/* Tab Navigation */}
+
             <div className="flex gap-2 bg-gray-100 rounded-xl p-1">
               {(["available", "claimed", "delivered"] as const).map((t) => (
                 <button
@@ -299,7 +363,7 @@ export default function DriverDashboard() {
         {/* Orders Grid */}
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[1, 2, 3].map(i => (
+            {[1, 2, 3].map((i) => (
               <div key={i} className="bg-white rounded-2xl p-6 animate-pulse">
                 <div className="h-4 bg-gray-200 rounded w-3/4 mb-4"></div>
                 <div className="h-3 bg-gray-200 rounded w-1/2 mb-6"></div>
@@ -311,7 +375,7 @@ export default function DriverDashboard() {
             ))}
           </div>
         ) : filteredOrders.length === 0 ? (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="bg-white rounded-2xl border border-gray-100 p-16 text-center shadow-sm"
@@ -357,13 +421,43 @@ export default function DriverDashboard() {
                         </p>
                       </div>
                     </div>
-                    
-                    <button
-                      onClick={() => { setSelectedOrder(order); setShowDetails(true); }}
-                      className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                    >
-                      View details →
-                    </button>
+
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <button
+                        onClick={() => { setSelectedOrder(order); setShowDetails(true); }}
+                        className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                      >
+                        View details →
+                      </button>
+
+                      {/* Tracking button — only on claimed orders */}
+                      {tab === "claimed" && (
+                        <button
+                          onClick={() => setShowTracking(showTracking === order.id ? null : order.id)}
+                          className={`text-xs font-medium flex items-center gap-1 px-2 py-1 rounded-full transition ${
+                            showTracking === order.id
+                              ? "bg-green-100 text-green-600"
+                              : "bg-gray-100 text-gray-500 hover:bg-green-50 hover:text-green-600"
+                          }`}
+                        >
+                          📍 {showTracking === order.id ? "Hide tracking" : "Track"}
+                        </button>
+                      )}
+
+                      {/* Chat button — only on claimed orders */}
+                      {tab === "claimed" && (
+                        <button
+                          onClick={() => setChatOrderId(chatOrderId === order.id ? null : order.id)}
+                          className={`text-xs font-medium flex items-center gap-1 px-2 py-1 rounded-full transition ${
+                            chatOrderId === order.id
+                              ? "bg-blue-100 text-blue-600"
+                              : "bg-gray-100 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
+                          }`}
+                        >
+                          💬 {chatOrderId === order.id ? "Close chat" : "Chat"}
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Order Body */}
@@ -497,7 +591,7 @@ export default function DriverDashboard() {
                   </button>
                 </div>
               </div>
-              
+
               <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
                 <div>
                   <h4 className="font-semibold text-gray-700 mb-2">Customer Information</h4>
@@ -507,14 +601,14 @@ export default function DriverDashboard() {
                     <p><span className="text-gray-500">Email:</span> {selectedOrder.customer_email || "Not provided"}</p>
                   </div>
                 </div>
-                
+
                 <div>
                   <h4 className="font-semibold text-gray-700 mb-2">Delivery Address</h4>
                   <div className="bg-gray-50 rounded-xl p-4">
                     <p>{selectedOrder.delivery_address}</p>
                   </div>
                 </div>
-                
+
                 <div>
                   <h4 className="font-semibold text-gray-700 mb-2">Order Items</h4>
                   <div className="bg-gray-50 rounded-xl p-4 space-y-2">
@@ -533,7 +627,7 @@ export default function DriverDashboard() {
                   </div>
                 </div>
               </div>
-              
+
               <div className="p-6 border-t border-gray-100">
                 <button
                   onClick={() => setShowDetails(false)}
@@ -546,6 +640,90 @@ export default function DriverDashboard() {
           </>
         )}
       </AnimatePresence>
+
+      {/* Tracking Modal */}
+      <AnimatePresence>
+        {showTracking && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 z-50"
+              onClick={() => setShowTracking(null)}
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden"
+            >
+              <div className="bg-gradient-to-r from-green-600 to-green-700 p-6 text-white">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="text-xl font-bold">📍 Live Tracking</h3>
+                    <p className="text-green-100 text-sm mt-1">Order #{showTracking.slice(0, 8)}</p>
+                  </div>
+                  <button onClick={() => setShowTracking(null)} className="text-white hover:bg-white/20 rounded-full p-1">
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+                {/* Driver Location Tracker */}
+                <DriverLocationTracker orderId={showTracking} />
+                
+                {/* Live Map */}
+                <div className="mt-4">
+                  <p className="text-sm font-medium text-gray-700 mb-2">Customer Location</p>
+                  <MapComponent 
+                    orderId={showTracking}
+                    driverLocation={driverLocation ?? undefined}
+                    isDriver={true}
+                  />
+                </div>
+
+                {/* Status info */}
+                {driverLocation && (
+                  <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Driver Status:</span>
+                      <span className={`font-semibold ${
+                        driverLocation.status === 'active' ? 'text-green-600' :
+                        driverLocation.status === 'idle' ? 'text-yellow-600' : 'text-gray-400'
+                      }`}>
+                        {driverLocation.status === 'active' ? '🟢 Active' :
+                         driverLocation.status === 'idle' ? '🟡 Idle' : '⚪ Offline'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Last Update:</span>
+                      <span className="text-gray-700">{new Date(driverLocation.updated_at).toLocaleTimeString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Accuracy:</span>
+                      <span className="text-gray-700">{driverLocation.accuracy?.toFixed(0) || 'N/A'} meters</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-6 border-t border-gray-100">
+                <button
+                  onClick={() => setShowTracking(null)}
+                  className="w-full py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition"
+                >
+                  Close Tracking
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ✅ Chat — fixed bottom right, only shows for claimed orders */}
+      {chatOrderId && <OrderChat orderId={chatOrderId} />}
     </div>
   );
 }

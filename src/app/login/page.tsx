@@ -51,7 +51,7 @@ export default function LoginPage() {
       return;
     }
 
-    if (form.password.length < 6) {
+    if (form.password.length < 5) {
       setError("Password must be at least 6 characters.");
       return;
     }
@@ -83,7 +83,7 @@ export default function LoginPage() {
 
     // Redirect based on role
     if (role === "driver") {
-      router.push("/driver-dashboard");
+      router.push("/driver/dashboard");
     } else if (role === "admin") {
       router.push("/admin");
     } else {
@@ -119,32 +119,40 @@ export default function LoginPage() {
       </AnimatePresence>
 
       {/* Floating Particles */}
-      <div className="absolute inset-0 z-0 overflow-hidden">
-        {[...Array(20)].map((_, i) => (
-          <motion.div
-            key={i}
-            className="absolute bg-white/20 rounded-full"
-            initial={{
-              x: Math.random() * window.innerWidth,
-              y: Math.random() * window.innerHeight,
-              scale: Math.random() * 0.5 + 0.2,
-            }}
-            animate={{
-              y: [null, -100, -200],
-              opacity: [0, 1, 0],
-            }}
-            transition={{
-              duration: Math.random() * 10 + 10,
-              repeat: Infinity,
-              delay: Math.random() * 10,
-            }}
-            style={{
-              width: Math.random() * 10 + 5,
-              height: Math.random() * 10 + 5,
-            }}
-          />
-        ))}
-      </div>
+{/* ✅ Static particles - no Math.random() */}
+<div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+  {[
+    { x: 10, y: 20, w: 8, h: 8, delay: 0, duration: 12 },
+    { x: 25, y: 50, w: 6, h: 6, delay: 2, duration: 15 },
+    { x: 40, y: 10, w: 10, h: 10, delay: 4, duration: 11 },
+    { x: 55, y: 70, w: 7, h: 7, delay: 1, duration: 14 },
+    { x: 70, y: 30, w: 9, h: 9, delay: 3, duration: 13 },
+    { x: 80, y: 60, w: 5, h: 5, delay: 5, duration: 16 },
+    { x: 90, y: 15, w: 8, h: 8, delay: 2, duration: 12 },
+    { x: 15, y: 80, w: 6, h: 6, delay: 6, duration: 15 },
+  ].map((p, i) => (
+    <motion.div
+      key={i}
+      className="absolute bg-white/20 rounded-full"
+      animate={{
+        y: [-20, -150],
+        opacity: [0, 0.6, 0],
+      }}
+      transition={{
+        duration: p.duration,
+        repeat: Infinity,
+        delay: p.delay,
+        ease: "linear",
+      }}
+      style={{
+        left: `${p.x}%`,
+        top: `${p.y}%`,
+        width: p.w,
+        height: p.h,
+      }}
+    />
+  ))}
+</div>
 
       {/* Main Content */}
       <div className="relative z-10 min-h-screen flex items-center justify-center px-4 py-12">
@@ -205,7 +213,7 @@ export default function LoginPage() {
                   <input
                     type="email"
                     placeholder="you@example.com"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition bg-white/90"
+                    className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition text-black bg-white/90"
                     value={form.email}
                     onChange={(e) => setForm({ ...form, email: e.target.value })}
                   />
@@ -228,7 +236,7 @@ export default function LoginPage() {
                   <input
                     type={showPassword ? "text" : "password"}
                     placeholder="Enter your password"
-                    className="w-full pl-10 pr-12 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition bg-white/90"
+                    className="w-full pl-10 pr-12 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition text-black bg-white/90"
                     value={form.password}
                     onChange={(e) => setForm({ ...form, password: e.target.value })}
                   />
@@ -352,16 +360,16 @@ export default function LoginPage() {
         </motion.div>
       </div>
 
-      {/* Custom CSS for animations */}
-      <style jsx>{`
-        @keyframes float {
-          0%, 100% { transform: translateY(0px); }
-          50% { transform: translateY(-10px); }
-        }
-        .animate-float {
-          animation: float 3s ease-in-out infinite;
-        }
-      `}</style>
+      {/* ✅ Replace with this */}
+<style>{`
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+  }
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+`}</style>
     </div>
   );
 }
