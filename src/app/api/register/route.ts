@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/db";
+import { users } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 
 export async function POST(req: NextRequest) {
@@ -28,18 +30,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ✅ SAFE user check (fixes silent Supabase errors)
-    const { data: existingUser, error: checkError } = await supabase
-      .from("users")
-      .select("id")
-      .eq("email", email)
-      .maybeSingle();
+    // ✅ Check if user exists using Drizzle
+    const existingUser = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
 
-    if (checkError) {
-      console.error("CHECK ERROR:", checkError);
-    }
-
-    if (existingUser) {
+    if (existingUser.length > 0) {
       return NextResponse.json(
         { error: "User already exists" },
         { status: 409 }
@@ -49,40 +47,28 @@ export async function POST(req: NextRequest) {
     // ✅ Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // ✅ Insert user
-    const { data, error } = await supabase
-      .from("users")
-      .insert([
-        {
-          full_name,
-          email,
-          phone,
-          password_hash: hashedPassword,
-          role,
-          address,
-          license_number,
-          vehicle_type,
-          vehicle_registration,
-        },
-      ])
-      .select()
-      .maybeSingle();
+    // ✅ Insert user with Drizzle
+    const newUser = await db
+      .insert(users)
+      .values({
+        fullName: full_name,
+        email,
+        phone,
+        passwordHash: hashedPassword,
+        role,
+        address: role === "Customer" ? address : null,
+        licenseNumber: role === "Driver" ? license_number : null,
+        vehicleType: role === "Driver" ? vehicle_type : null,
+        vehicleRegistration: role === "Driver" ? vehicle_registration : null,
+      })
+      .returning();
 
-    if (error) {
-      console.error("INSERT ERROR:", error);
-
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      );
-    }
-
-    console.log("USER INSERTED:", data);
+    console.log("USER INSERTED:", newUser[0]);
 
     return NextResponse.json(
       {
         message: "User registered successfully",
-        user: data,
+        user: newUser[0],
       },
       { status: 201 }
     );

@@ -297,14 +297,13 @@ export default function Dashboard() {
           </div>
         </motion.div>
 
-        {/* Quick Actions */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          {[
-            { icon: "🛒", label: "Place Order", action: "/order" },
-            { icon: "📋", label: "My Orders", action: "/orders" },
-            { icon: "💬", label: "Chat Support", action: "#" },
-            { icon: "📍", label: "Track Order", action: "#" },
-          ].map((item, index) => (
+       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+  {[
+    { icon: "🛒", label: "Place Order", action: "/customer/orders" },
+    { icon: "📋", label: "My Orders", action: "/customer/fullorders" },
+    { icon: "💬", label: "Chat Support", action: "#" },
+    { icon: "📍", label: "Track Order", action: "#" },
+  ].map((item, index) => (
             <motion.div
               key={item.label}
               initial={{ opacity: 0, y: 20 }}
