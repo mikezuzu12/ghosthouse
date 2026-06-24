@@ -53,6 +53,20 @@ export default function OrderChat({ orderId, customerName, isDriver = false }: P
     myIdRef.current = myId;
   }, [myId]);
 
+  // Shared helper: merge any messages not already in state, in order.
+  // Used by both the initial fetch, the realtime handler, and the
+  // polling fallback below, so there's one single place dedup happens.
+  function mergeMessages(incoming: Message[]) {
+    setMessages((prev) => {
+      const existingIds = new Set(prev.map((m) => m.id));
+      const fresh = incoming.filter((m) => !existingIds.has(m.id));
+      if (fresh.length === 0) return prev;
+      return [...prev, ...fresh].sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+    });
+  }
+
   // Fetch existing messages
   useEffect(() => {
     if (!orderId) return;
@@ -75,6 +89,32 @@ export default function OrderChat({ orderId, customerName, isDriver = false }: P
         setError("Failed to load messages");
         setLoading(false);
       });
+  }, [orderId]);
+
+  // ---- POLLING FALLBACK ----
+  // Independent of the realtime websocket below. Every 3 seconds, asks the
+  // server "any new messages for this order?" and merges them in. This is
+  // what GUARANTEES messages show up even if the Supabase Realtime
+  // subscription never connects, gets dropped, or is misconfigured on a
+  // given network. Realtime (below) is still used for the instant feel
+  // when it does work — this is just the safety net.
+  useEffect(() => {
+    if (!orderId) return;
+
+    const interval = setInterval(() => {
+      fetch(`/api/messages?order_id=${orderId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.messages) {
+            mergeMessages(data.messages);
+          }
+        })
+        .catch(() => {
+          // Silent fail on poll — realtime or the next poll may still work.
+        });
+    }, 3000);
+
+    return () => clearInterval(interval);
   }, [orderId]);
 
   // Supabase realtime subscription.
@@ -104,14 +144,10 @@ export default function OrderChat({ orderId, customerName, isDriver = false }: P
           filter: `order_id=eq.${orderId}`,
         },
         (payload) => {
-          console.log("New message received:", payload);
+          console.log("New message received via realtime:", payload);
           const incoming = payload.new as Message;
 
-          setMessages((prev) => {
-            // Prevent duplicates
-            if (prev.find((m) => m.id === incoming.id)) return prev;
-            return [...prev, incoming];
-          });
+          mergeMessages([incoming]);
 
           // Only count as unread if chat is closed and message is not from me
           if (!openRef.current && incoming.sender_id !== myIdRef.current) {
@@ -188,6 +224,12 @@ export default function OrderChat({ orderId, customerName, isDriver = false }: P
       }
 
       console.log("Message sent successfully:", data);
+
+      // Optimistically merge in our own sent message right away too,
+      // in case neither realtime nor the next poll tick has fired yet.
+      if (data.message) {
+        mergeMessages([data.message]);
+      }
     } catch (err) {
       console.error("Failed to send message:", err);
       setError("Failed to send message. Please try again.");
@@ -327,7 +369,7 @@ export default function OrderChat({ orderId, customerName, isDriver = false }: P
           ref={inputRef}
           type="text"
           placeholder="Type a message..."
-          className="flex-1 border border-gray-200 rounded-full px-4 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+          className="flex-1 border border-gray-200 rounded-full px-4 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition text-black"
           value={newMessage}
           onChange={(e) => setNewMessage(e.target.value)}
           onKeyDown={handleKeyDown}

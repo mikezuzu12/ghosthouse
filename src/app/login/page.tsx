@@ -1,19 +1,37 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { signIn, getSession } from "next-auth/react";
+import { signIn, getSession, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { data: session, status } = useSession();
   const [form, setForm] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [backgroundIndex, setBackgroundIndex] = useState(0);
+
+  // ✅ Redirect already logged in users based on role (case-insensitive)
+  useEffect(() => {
+    if (status === "loading") return;
+    if (status === "authenticated" && session?.user) {
+      const role = (session.user as any)?.role?.toLowerCase(); // ← Convert to lowercase
+      console.log("🔍 Session role check:", role);
+      
+      if (role === "driver") {
+        router.push("/driver/dashboard");
+      } else if (role === "Admin") {
+        router.push("/admin");
+      } else {
+        router.push("/dashboard");
+      }
+    }
+  }, [status, session, router]);
 
   // Background slideshow
   const backgrounds = [
@@ -29,7 +47,6 @@ export default function LoginPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Load saved email if remember me was checked
   useEffect(() => {
     const savedEmail = localStorage.getItem("rememberedEmail");
     if (savedEmail) {
@@ -37,6 +54,21 @@ export default function LoginPage() {
       setRememberMe(true);
     }
   }, []);
+
+  // Show loading while session is being checked
+  if (status === "loading") {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#0A0E1A" }}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+          <p className="text-slate-400 text-sm">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Don't render login form if already authenticated
+  if (status === "authenticated") return null;
 
   async function handleLogin() {
     setError("");
@@ -58,43 +90,52 @@ export default function LoginPage() {
 
     setLoading(true);
 
-    const result = await signIn("credentials", {
-      email: form.email,
-      password: form.password,
-      redirect: false,
-    });
+    try {
+      const result = await signIn("credentials", {
+        email: form.email,
+        password: form.password,
+        redirect: false,
+      });
 
-    setLoading(false);
+      setLoading(false);
 
-    if (result?.error) {
-      setError("Invalid email or password. Please try again.");
-      return;
-    }
+      if (result?.error) {
+        setError("Invalid email or password. Please try again.");
+        return;
+      }
 
-    // Save email if remember me is checked
-    if (rememberMe) {
-      localStorage.setItem("rememberedEmail", form.email);
-    } else {
-      localStorage.removeItem("rememberedEmail");
-    }
+      if (rememberMe) {
+        localStorage.setItem("rememberedEmail", form.email);
+      } else {
+        localStorage.removeItem("rememberedEmail");
+      }
 
-    const session = await getSession();
-    const role = (session?.user as any)?.role?.toLowerCase();
+      // ✅ Get fresh session after login
+      const freshSession = await getSession();
+      const role = (freshSession?.user as any)?.role?.toLowerCase(); // ← Convert to lowercase
 
-    // Redirect based on role
-    if (role === "driver") {
-      router.push("/driver/dashboard");
-    } else if (role === "admin") {
-      router.push("/admin");
-    } else {
-      router.push("/dashboard");
+      console.log("🔑 LOGIN ROLE:", role);
+
+      // ✅ Case-insensitive role check
+      if (role === "driver") {
+        console.log("🚚 Redirecting to driver dashboard");
+        router.push("/driver/dashboard");
+      } else if (role === "admin") {
+        console.log("👑 Redirecting to admin");
+        router.push("/admin");
+      } else {
+        console.log("👤 Redirecting to customer dashboard");
+        router.push("/dashboard");
+      }
+
+    } catch (err) {
+      setLoading(false);
+      setError("Network error. Please try again.");
     }
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      handleLogin();
-    }
+    if (e.key === "Enter") handleLogin();
   };
 
   return (
@@ -119,40 +160,26 @@ export default function LoginPage() {
       </AnimatePresence>
 
       {/* Floating Particles */}
-{/* ✅ Static particles - no Math.random() */}
-<div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-  {[
-    { x: 10, y: 20, w: 8, h: 8, delay: 0, duration: 12 },
-    { x: 25, y: 50, w: 6, h: 6, delay: 2, duration: 15 },
-    { x: 40, y: 10, w: 10, h: 10, delay: 4, duration: 11 },
-    { x: 55, y: 70, w: 7, h: 7, delay: 1, duration: 14 },
-    { x: 70, y: 30, w: 9, h: 9, delay: 3, duration: 13 },
-    { x: 80, y: 60, w: 5, h: 5, delay: 5, duration: 16 },
-    { x: 90, y: 15, w: 8, h: 8, delay: 2, duration: 12 },
-    { x: 15, y: 80, w: 6, h: 6, delay: 6, duration: 15 },
-  ].map((p, i) => (
-    <motion.div
-      key={i}
-      className="absolute bg-white/20 rounded-full"
-      animate={{
-        y: [-20, -150],
-        opacity: [0, 0.6, 0],
-      }}
-      transition={{
-        duration: p.duration,
-        repeat: Infinity,
-        delay: p.delay,
-        ease: "linear",
-      }}
-      style={{
-        left: `${p.x}%`,
-        top: `${p.y}%`,
-        width: p.w,
-        height: p.h,
-      }}
-    />
-  ))}
-</div>
+      <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+        {[
+          { x: 10, y: 20, w: 8, h: 8, delay: 0, duration: 12 },
+          { x: 25, y: 50, w: 6, h: 6, delay: 2, duration: 15 },
+          { x: 40, y: 10, w: 10, h: 10, delay: 4, duration: 11 },
+          { x: 55, y: 70, w: 7, h: 7, delay: 1, duration: 14 },
+          { x: 70, y: 30, w: 9, h: 9, delay: 3, duration: 13 },
+          { x: 80, y: 60, w: 5, h: 5, delay: 5, duration: 16 },
+          { x: 90, y: 15, w: 8, h: 8, delay: 2, duration: 12 },
+          { x: 15, y: 80, w: 6, h: 6, delay: 6, duration: 15 },
+        ].map((p, i) => (
+          <motion.div
+            key={i}
+            className="absolute bg-white/20 rounded-full"
+            animate={{ y: [-20, -150], opacity: [0, 0.6, 0] }}
+            transition={{ duration: p.duration, repeat: Infinity, delay: p.delay, ease: "linear" }}
+            style={{ left: `${p.x}%`, top: `${p.y}%`, width: p.w, height: p.h }}
+          />
+        ))}
+      </div>
 
       {/* Main Content */}
       <div className="relative z-10 min-h-screen flex items-center justify-center px-4 py-12">
@@ -163,9 +190,9 @@ export default function LoginPage() {
           className="w-full max-w-md"
         >
           <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl p-8 border border-white/20">
-            
-            {/* Logo and Title */}
-            <motion.div 
+
+            {/* Logo */}
+            <motion.div
               className="text-center mb-8"
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
@@ -180,7 +207,7 @@ export default function LoginPage() {
               <p className="text-gray-500 text-sm mt-2">Sign in to your account</p>
             </motion.div>
 
-            {/* Error Message */}
+            {/* Error */}
             <AnimatePresence>
               {error && (
                 <motion.div
@@ -195,17 +222,10 @@ export default function LoginPage() {
               )}
             </AnimatePresence>
 
-            {/* Login Form */}
+            {/* Form */}
             <div className="space-y-5" onKeyPress={handleKeyPress}>
-              {/* Email Field */}
-              <motion.div
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.1 }}
-              >
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Email Address
-                </label>
+              <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }}>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Email Address</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <span className="text-gray-400">📧</span>
@@ -220,15 +240,8 @@ export default function LoginPage() {
                 </div>
               </motion.div>
 
-              {/* Password Field */}
-              <motion.div
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.2 }}
-              >
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Password
-                </label>
+              <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }}>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Password</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <span className="text-gray-400">🔒</span>
@@ -250,13 +263,7 @@ export default function LoginPage() {
                 </div>
               </motion.div>
 
-              {/* Remember Me & Forgot Password */}
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.3 }}
-                className="flex items-center justify-between"
-              >
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="flex items-center justify-between">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -266,15 +273,11 @@ export default function LoginPage() {
                   />
                   <span className="text-sm text-gray-600">Remember me</span>
                 </label>
-                <Link 
-                  href="/forgot-password"
-                  className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-                >
+                <Link href="/forgot-password" className="text-sm text-blue-600 hover:text-blue-700 font-medium">
                   Forgot password?
                 </Link>
               </motion.div>
 
-              {/* Login Button */}
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
@@ -295,7 +298,6 @@ export default function LoginPage() {
                 )}
               </motion.button>
 
-              {/* Divider */}
               <div className="relative my-6">
                 <div className="absolute inset-0 flex items-center">
                   <div className="w-full border-t border-gray-200"></div>
@@ -305,7 +307,6 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {/* Social Login Options */}
               <div className="grid grid-cols-2 gap-3">
                 <motion.button
                   whileHover={{ scale: 1.02 }}
@@ -316,7 +317,6 @@ export default function LoginPage() {
                   <span className="text-xl">G</span>
                   <span className="text-sm font-medium">Google</span>
                 </motion.button>
-                
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
@@ -328,14 +328,10 @@ export default function LoginPage() {
                 </motion.button>
               </div>
 
-              {/* Register Link */}
               <div className="text-center pt-4">
                 <p className="text-sm text-gray-600">
                   Don't have an account?{" "}
-                  <Link 
-                    href="/register" 
-                    className="text-blue-600 hover:text-blue-700 font-semibold"
-                  >
+                  <Link href="/register" className="text-blue-600 hover:text-blue-700 font-semibold">
                     Create an account
                   </Link>
                 </p>
@@ -348,7 +344,6 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Footer Note */}
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -360,16 +355,15 @@ export default function LoginPage() {
         </motion.div>
       </div>
 
-      {/* ✅ Replace with this */}
-<style>{`
-  @keyframes float {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-10px); }
-  }
-  .animate-float {
-    animation: float 3s ease-in-out infinite;
-  }
-`}</style>
+      <style>{`
+        @keyframes float {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-10px); }
+        }
+        .animate-float {
+          animation: float 3s ease-in-out infinite;
+        }
+      `}</style>
     </div>
   );
 }

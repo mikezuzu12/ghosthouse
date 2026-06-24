@@ -1,34 +1,100 @@
 "use client";
 
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 
 type Order = {
-  id: number;
-  name: string;
-  email: string;
-  phone?: string;
-  address: string;
+  id: string;
+  customer_name: string;
+  customer_email: string;
+  customer_phone?: string;
+  delivery_address: string;
+  items: { name: string; quantity: number; price: number }[];
   total: number;
   status: string;
+  delivery_status: string;
+  special_instructions?: string;
+  delivery_date?: string;
+  delivery_time?: string;
   created_at: string;
 };
 
+// ── Status Pill Component (matches dashboard) ──
+function StatusPill({ status }: { status: string }) {
+  const map: Record<string, { label: string; color: string; dot: string }> = {
+    unclaimed:  { label: "Pending",      color: "text-amber-400 bg-amber-500/10 border-amber-500/30", dot: "bg-amber-400" },
+    claimed:    { label: "On the Way",   color: "text-blue-400 bg-blue-500/10 border-blue-500/30", dot: "bg-blue-400" },
+    in_transit: { label: "In Transit",   color: "text-cyan-400 bg-cyan-500/10 border-cyan-500/30", dot: "bg-cyan-400" },
+    delivered:  { label: "Delivered",    color: "text-green-400 bg-green-500/10 border-green-500/30", dot: "bg-green-400" },
+    cancelled:  { label: "Cancelled",    color: "text-red-400 bg-red-500/10 border-red-500/30", dot: "bg-red-400" },
+  };
+  const s = map[status?.toLowerCase()] ?? { 
+    label: status, 
+    color: "text-slate-400 bg-white/5 border-white/10", 
+    dot: "bg-slate-400" 
+  };
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${s.color}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${s.dot} ${status !== 'cancelled' ? 'animate-pulse' : ''}`} />
+      {s.label}
+    </span>
+  );
+}
+
+// ── Loading Skeleton ──
+function OrdersSkeleton() {
+  return (
+    <div className="min-h-screen" style={{ background: "#0A0E1A" }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pt-2">
+          <div>
+            <div className="h-8 w-32 bg-white/5 rounded animate-pulse mb-2" />
+            <div className="h-4 w-48 bg-white/5 rounded animate-pulse" />
+          </div>
+          <div className="h-10 w-24 bg-white/5 rounded animate-pulse" />
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="bg-white/5 rounded-2xl border border-white/8 p-6 animate-pulse">
+              <div className="h-6 bg-white/5 rounded w-1/4 mb-4" />
+              <div className="space-y-3">
+                <div className="h-4 bg-white/5 rounded w-3/4" />
+                <div className="h-4 bg-white/5 rounded w-1/2" />
+                <div className="h-20 bg-white/5 rounded" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function OrdersPage() {
+  const router = useRouter();
+  const { data: session, status } = useSession();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchOrders = async () => {
     try {
+      setLoading(true);
       setError(null);
-      const res = await fetch("/api/orders");
-      
+      const res = await fetch("/api/orders/my-orders");
+
+      if (res.status === 401) {
+        setError("Please log in to view your orders.");
+        return;
+      }
+
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`);
       }
-      
+
       const data = await res.json();
       setOrders(data.orders || []);
     } catch (err) {
@@ -40,44 +106,14 @@ export default function OrdersPage() {
   };
 
   useEffect(() => {
-    fetchOrders();
-  }, []);
-
-  const getStatusColor = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case "delivered":
-        return "bg-green-50 text-green-700 border-green-200";
-      case "in_transit":
-      case "in transit":
-        return "bg-blue-50 text-blue-700 border-blue-200";
-      case "claimed":
-        return "bg-amber-50 text-amber-700 border-amber-200";
-      case "pending":
-        return "bg-gray-50 text-gray-700 border-gray-200";
-      case "cancelled":
-        return "bg-red-50 text-red-700 border-red-200";
-      default:
-        return "bg-gray-50 text-gray-700 border-gray-200";
+    if (status === "unauthenticated") {
+      router.push("/login");
+      return;
     }
-  };
-
-  const getStatusEmoji = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case "delivered":
-        return "✅";
-      case "in_transit":
-      case "in transit":
-        return "🚚";
-      case "claimed":
-        return "📦";
-      case "pending":
-        return "⏳";
-      case "cancelled":
-        return "❌";
-      default:
-        return "📋";
+    if (status === "authenticated") {
+      fetchOrders();
     }
-  };
+  }, [status, router]);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {
@@ -89,131 +125,135 @@ export default function OrdersPage() {
     });
   };
 
-  // Loading skeleton
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
-        <nav className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-gray-200/50 shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
-            <Link
-              href="/dashboard"
-              className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700 font-medium"
-            >
-              ← Back to Dashboard
-            </Link>
-          </div>
-        </nav>
+  const getStatusEmoji = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case "delivered": return "✅";
+      case "claimed": return "🚚";
+      case "in_transit": return "🚛";
+      case "unclaimed": return "⏳";
+      case "cancelled": return "❌";
+      default: return "📋";
+    }
+  };
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-          <h1 className="text-3xl font-bold mb-8 text-gray-800">All Orders</h1>
-          <div className="grid gap-4">
-            {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="bg-white rounded-2xl border border-gray-200/50 p-6 shadow-sm animate-pulse"
-              >
-                <div className="h-6 bg-gray-200 rounded w-1/4 mb-4"></div>
-                <div className="space-y-3">
-                  <div className="h-4 bg-gray-100 rounded w-3/4"></div>
-                  <div className="h-4 bg-gray-100 rounded w-1/2"></div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+  if (status === "loading" || loading) {
+    return <OrdersSkeleton />;
   }
 
+  const user = session?.user as any;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
-      {/* Navbar */}
-      <nav className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-gray-200/50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
-          <div className="flex items-center justify-between">
+    <div className="min-h-screen font-sans" style={{ background: "#0A0E1A", color: "#F0F4FF" }}>
+
+      {/* ── Navbar ── */}
+      <nav className="sticky top-0 z-40 border-b border-white/8 backdrop-blur-xl" style={{ background: "rgba(10,14,26,0.85)" }}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5 flex-shrink-0">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-sm"
+              style={{ background: "linear-gradient(135deg,#3B82F6,#06B6D4)" }}>
+              💧
+            </div>
+            <span className="font-bold text-white tracking-tight text-sm">AquaPure</span>
+            <span className="hidden sm:inline text-xs text-slate-600 font-medium border-l border-white/10 pl-2.5 ml-0.5">
+              Orders
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
             <Link
               href="/dashboard"
-              className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700 font-medium transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 transition-all"
             >
-              ← Back to Dashboard
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              Dashboard
             </Link>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center shadow-md">
-                <span className="text-white text-xl">💧</span>
+
+            <div className="flex items-center gap-2 pl-2 border-l border-white/10">
+              <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                style={{ background: "linear-gradient(135deg,#3B82F6,#06B6D4)" }}>
+                {user?.name?.[0] ?? "U"}
               </div>
-              <h1 className="font-bold text-gray-800">AquaPure</h1>
+              <span className="hidden sm:inline text-sm text-slate-300 font-medium">{user?.name?.split(" ")[0]}</span>
             </div>
           </div>
         </div>
       </nav>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        {/* Error Message */}
+      {/* ── Main Content ── */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+
+        {/* Error Banner */}
         <AnimatePresence>
           {error && (
             <motion.div
-              initial={{ opacity: 0, y: -20 }}
+              initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-6 flex items-center justify-between"
+              exit={{ opacity: 0 }}
+              className="flex items-center justify-between px-4 py-3 rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 text-sm"
             >
               <span>⚠️ {error}</span>
-              <button
-                onClick={() => setError(null)}
-                className="text-red-500 hover:text-red-700 text-xl"
-              >
-                ✕
-              </button>
+              <button onClick={() => setError(null)} className="text-red-500 hover:text-red-300 ml-4">✕</button>
             </motion.div>
           )}
         </AnimatePresence>
 
         {/* Header */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
+          className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pt-2"
         >
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-3xl font-bold text-gray-800 mb-1">
-                All Orders
-              </h2>
-              <p className="text-gray-500">
-                {orders.length === 0
-                  ? "No orders yet"
-                  : `${orders.length} order${orders.length !== 1 ? "s" : ""} total`}
-              </p>
-            </div>
-            <button
-              onClick={fetchOrders}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition shadow-md hover:shadow-lg"
-            >
-              🔄 Refresh
-            </button>
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
+              My Orders
+            </h1>
+            <p className="text-slate-400 text-sm mt-1">
+              {orders.length === 0
+                ? "No orders yet"
+                : `${orders.length} order${orders.length !== 1 ? "s" : ""} total`}
+            </p>
           </div>
+          
+          <button
+            onClick={fetchOrders}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95 flex-shrink-0"
+            style={{ background: "linear-gradient(135deg,#3B82F6,#06B6D4)" }}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
+          </button>
         </motion.div>
 
         {/* Orders Grid */}
         {orders.length === 0 ? (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-2xl border border-gray-200/50 p-12 text-center shadow-sm"
+            className="rounded-2xl border border-white/8 p-12 text-center" 
+            style={{ background: "#111827" }}
           >
-            <div className="text-7xl mb-4">📭</div>
-            <h3 className="text-2xl font-bold text-gray-800 mb-2">
-              No Orders Yet
-            </h3>
-            <p className="text-gray-500 mb-6">
-              Start your first order and track it here!
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4"
+              style={{ 
+                background: "linear-gradient(135deg,rgba(59,130,246,0.2),rgba(6,182,212,0.2))",
+                border: "1px solid rgba(59,130,246,0.25)"
+              }}
+            >
+              📭
+            </div>
+            <h3 className="text-xl font-bold text-white mb-2">No Orders Yet</h3>
+            <p className="text-slate-500 text-sm mb-6 max-w-xs mx-auto">
+              Place your first order and track it here!
             </p>
             <Link
               href="/customer/orders"
-              className="inline-flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-indigo-700 text-white rounded-xl font-semibold hover:shadow-lg transition hover:-translate-y-0.5"
+              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
+              style={{ background: "linear-gradient(135deg,#3B82F6,#06B6D4)" }}
             >
-              <span>🛒</span>
-              Place Your First Order
+              🛒 Place Your First Order
             </Link>
           </motion.div>
         ) : (
@@ -225,83 +265,104 @@ export default function OrdersPage() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -20 }}
-                  transition={{ delay: index * 0.1 }}
-                  className="bg-white rounded-2xl border border-gray-200/50 overflow-hidden shadow-sm hover:shadow-md transition group cursor-pointer"
+                  transition={{ delay: index * 0.05 }}
+                  className="rounded-2xl border border-white/8 overflow-hidden hover:border-white/15 transition-all cursor-pointer group"
+                  style={{ background: "#111827" }}
+                  onClick={() => router.push(`/orders/${order.id}`)}
                 >
                   {/* Card Header */}
-                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-6 py-4 border-b border-gray-200/50">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wide">
-                          Order ID
-                        </p>
-                        <p className="text-lg font-bold text-gray-800">
-                          #{order.id}
-                        </p>
-                      </div>
-                      <span
-                        className={`px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(
-                          order.status
-                        )}`}
-                      >
-                        {getStatusEmoji(order.status)} {order.status}
-                      </span>
+                  <div className="px-5 py-4 border-b border-white/8 flex items-start justify-between"
+                    style={{ background: "linear-gradient(90deg, rgba(59,130,246,0.08) 0%, rgba(6,182,212,0.04) 100%)" }}
+                  >
+                    <div>
+                      <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Order ID</p>
+                      <p className="text-sm font-bold text-white font-mono tracking-tight">
+                        #{order.id.slice(0, 8).toUpperCase()}
+                      </p>
                     </div>
+                    <StatusPill status={order.delivery_status} />
                   </div>
 
                   {/* Card Body */}
-                  <div className="px-6 py-5 space-y-4">
-                    {/* Customer Info */}
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                        Customer
-                      </p>
-                      <p className="font-semibold text-gray-800">{order.name}</p>
-                      <p className="text-sm text-gray-500">{order.email}</p>
+                  <div className="px-5 py-4 space-y-4">
+
+                    {/* Total */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-slate-500">Total amount</span>
+                      <span className="text-xl font-bold text-white">R{Number(order.total).toFixed(2)}</span>
                     </div>
 
-                    {/* Contact & Address */}
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      {order.phone && (
-                        <div>
-                          <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                            Phone
+                    {/* Items */}
+                    <div className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.03)" }}>
+                      <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-2">
+                        🛒 Items
+                      </p>
+                      <div className="space-y-1">
+                        {order.items?.slice(0, 3).map((item, i) => (
+                          <div key={i} className="flex justify-between text-sm">
+                            <span className="text-slate-400">{item.name} × {item.quantity}</span>
+                            <span className="text-slate-300 font-medium">
+                              R{(item.price * item.quantity).toFixed(2)}
+                            </span>
+                          </div>
+                        ))}
+                        {order.items?.length > 3 && (
+                          <p className="text-xs text-slate-500 mt-1">
+                            +{order.items.length - 3} more items
                           </p>
-                          <p className="text-gray-700 font-medium">{order.phone}</p>
-                        </div>
-                      )}
-                      <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                          Total
-                        </p>
-                        <p className="text-lg font-bold text-blue-600">
-                          R${order.total.toFixed(2)}
-                        </p>
+                        )}
                       </div>
                     </div>
 
-                    {/* Delivery Address */}
-                    <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                    {/* Address */}
+                    <div className="rounded-lg p-3" style={{ background: "rgba(255,255,255,0.02)" }}>
+                      <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-1">
                         📍 Delivery Address
                       </p>
-                      <p className="text-sm text-gray-700 leading-relaxed">
-                        {order.address}
-                      </p>
+                      <p className="text-sm text-slate-300 leading-relaxed">{order.delivery_address}</p>
                     </div>
 
-                    {/* Date */}
-                    <div className="text-xs text-gray-500 pt-2 border-t border-gray-100">
-                      <span className="font-medium">Ordered on:</span>{" "}
-                      {formatDate(order.created_at)}
-                    </div>
-                  </div>
+                    {/* Delivery date/time */}
+                    {(order.delivery_date || order.delivery_time) && (
+                      <div className="flex flex-wrap gap-2">
+                        {order.delivery_date && (
+                          <span className="text-xs text-blue-400 px-2 py-1 rounded-full border border-blue-500/20"
+                            style={{ background: "rgba(59,130,246,0.1)" }}
+                          >
+                            📅 {new Date(order.delivery_date).toLocaleDateString()}
+                          </span>
+                        )}
+                        {order.delivery_time && (
+                          <span className="text-xs text-cyan-400 px-2 py-1 rounded-full border border-cyan-500/20"
+                            style={{ background: "rgba(6,182,212,0.1)" }}
+                          >
+                            🕐 {order.delivery_time}
+                          </span>
+                        )}
+                      </div>
+                    )}
 
-                  {/* Card Footer */}
-                  <div className="px-6 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-t border-gray-200/50">
-                    <button className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition text-sm group-hover:shadow-md">
-                      View Details →
-                    </button>
+                    {/* Special instructions */}
+                    {order.special_instructions && (
+                      <div className="rounded-lg p-3 border border-amber-500/20"
+                        style={{ background: "rgba(245,158,11,0.08)" }}
+                      >
+                        <p className="text-xs text-amber-400 font-medium mb-1">📝 Special Instructions</p>
+                        <p className="text-xs text-amber-400/80">{order.special_instructions}</p>
+                      </div>
+                    )}
+
+                    {/* Order date */}
+                    <div className="flex items-center gap-2 pt-3 border-t border-white/8">
+                      <span className="text-xs text-slate-500">Ordered:</span>
+                      <span className="text-xs text-slate-400 font-mono">
+                        {formatDate(order.created_at)}
+                      </span>
+                      <span className="ml-auto text-xs text-slate-600 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-400/50" />
+                        {getStatusEmoji(order.delivery_status)}
+                      </span>
+                    </div>
                   </div>
                 </motion.div>
               ))}

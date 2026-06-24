@@ -11,11 +11,11 @@ export async function GET() {
   }
 
   const { data, error } = await supabase
-    .from("orders")
-    .select("*")
-    .eq("customer_email", session.user.email)
-    .order("created_at", { ascending: false });
-
+  .from("orders")
+  .select("*")
+  .ilike("customer_email", session.user.email ?? "")
+  .order("created_at", { ascending: false });
+  
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
