@@ -1,290 +1,474 @@
 "use client";
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { motion } from 'framer-motion';
-import { supabase } from '@/lib/supabase';
+import { useEffect, useState } from "react";
+import { useSession, signOut } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 
 type Stats = {
-  totalUsers: number;
-  totalCustomers: number;
-  totalDrivers: number;
   totalOrders: number;
-  pendingOrders: number;
-  claimedOrders: number;
-  deliveredOrders: number;
-  totalRevenue: number;
-  todayRevenue: number;
-  recentOrders: any[];
-  recentUsers: any[];
+  totalDrivers: number;
+  totalCustomers: number;
+  totalRevenue: string;
+  unclaimed: number;
+  claimed: number;
+  delivered: number;
+};
+
+type Order = {
+  id: string;
+  customer_name: string;
+  customer_email: string;
+  customer_phone: string;
+  delivery_address: string;
+  items: { name: string; quantity: number; price: number }[];
+  total: number;
+  delivery_status: string;
+  created_at: string;
+};
+
+type Driver = {
+  id: number;
+  full_name: string;
+  email: string;
+  phone: string;
+  created_at: string;
+  totalDeliveries: number;
+  activeOrders: number;
+};
+
+type Customer = {
+  id: number;
+  full_name: string;
+  email: string;
+  phone: string;
+  created_at: string;
+  totalOrders: number;
+  totalSpent: string;
 };
 
 export default function AdminDashboard() {
-  const [stats, setStats] = useState<Stats>({
-    totalUsers: 0,
-    totalCustomers: 0,
-    totalDrivers: 0,
-    totalOrders: 0,
-    pendingOrders: 0,
-    claimedOrders: 0,
-    deliveredOrders: 0,
-    totalRevenue: 0,
-    todayRevenue: 0,
-    recentOrders: [],
-    recentUsers: [],
-  });
+  const { data: session, status } = useSession();
+  const router = useRouter();
+
+  const [tab, setTab] = useState<"overview" | "orders" | "drivers" | "customers">("overview");
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const [search, setSearch] = useState("");
+  const [orderFilter, setOrderFilter] = useState("all");
 
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+    if (status === "loading") return;
+    if (status === "unauthenticated") router.push("/login");
+    if ((session?.user as any)?.role !== "Admin") router.push("/dashboard");
+  }, [status, session, router]);
 
   useEffect(() => {
-    fetchStats();
-  }, []);
+    if (status === "authenticated") {
+      fetchStats();
+    }
+  }, [status]);
 
-  const fetchStats = async () => {
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    if (tab === "orders") fetchOrders();
+    if (tab === "drivers") fetchDrivers();
+    if (tab === "customers") fetchCustomers();
+  }, [tab, status]);
+
+  useEffect(() => {
+    if (tab === "orders") fetchOrders();
+  }, [orderFilter, search]);
+
+  async function fetchStats() {
     setLoading(true);
-    try {
-      // Fetch users
-      const { data: users, error: usersError } = await supabase
-        .from('users')
-        .select('id, role, full_name, email, created_at')
-        .order('created_at', { ascending: false });
+    const res = await fetch("/api/admin/stats");
+    const data = await res.json();
+    setStats(data.stats);
+    setLoading(false);
+  }
 
-      if (usersError) throw usersError;
+  async function fetchOrders() {
+    setLoading(true);
+    const res = await fetch(`/api/admin/orders?status=${orderFilter}&search=${search}`);
+    const data = await res.json();
+    setOrders(data.orders || []);
+    setLoading(false);
+  }
 
-      // Fetch orders
-      const { data: orders, error: ordersError } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false });
+  async function fetchDrivers() {
+    setLoading(true);
+    const res = await fetch("/api/admin/drivers");
+    const data = await res.json();
+    setDrivers(data.drivers || []);
+    setLoading(false);
+  }
 
-      if (ordersError) throw ordersError;
+  async function fetchCustomers() {
+    setLoading(true);
+    const res = await fetch("/api/admin/customers");
+    const data = await res.json();
+    setCustomers(data.customers || []);
+    setLoading(false);
+  }
 
-      // Calculate stats
-      const customers = users?.filter(u => u.role?.toLowerCase() === 'customer') || [];
-      const drivers = users?.filter(u => u.role?.toLowerCase() === 'driver') || [];
-      const pendingOrders = orders?.filter(o => o.delivery_status === 'pending' || o.delivery_status === 'unclaimed') || [];
-      const claimedOrders = orders?.filter(o => o.delivery_status === 'claimed' || o.delivery_status === 'in_transit') || [];
-      const deliveredOrders = orders?.filter(o => o.delivery_status === 'delivered') || [];
+  async function updateOrderStatus(id: string, delivery_status: string) {
+    await fetch("/api/admin/orders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, delivery_status }),
+    });
+    fetchOrders();
+  }
 
-      // Calculate revenue
-      const totalRevenue = orders?.reduce((sum, o) => sum + (o.total || 0), 0) || 0;
-      const todayOrders = orders?.filter(o => {
-        const today = new Date();
-        const orderDate = new Date(o.created_at);
-        return orderDate.toDateString() === today.toDateString();
-      }) || [];
-      const todayRevenue = todayOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+  async function toggleDriver(id: number, currentRole: string) {
+    const action = currentRole === "Driver" ? "deactivate" : "activate";
+    await fetch("/api/admin/drivers", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, action }),
+    });
+    fetchDrivers();
+  }
 
-      setStats({
-        totalUsers: users?.length || 0,
-        totalCustomers: customers.length,
-        totalDrivers: drivers.length,
-        totalOrders: orders?.length || 0,
-        pendingOrders: pendingOrders.length,
-        claimedOrders: claimedOrders.length,
-        deliveredOrders: deliveredOrders.length,
-        totalRevenue,
-        todayRevenue,
-        recentOrders: orders?.slice(0, 5) || [],
-        recentUsers: users?.slice(0, 5) || [],
-      });
-    } catch (error) {
-      console.error('Error fetching stats:', error);
-    } finally {
-      setLoading(false);
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "unclaimed": return "bg-yellow-100 text-yellow-700";
+      case "claimed": return "bg-blue-100 text-blue-700";
+      case "delivered": return "bg-green-100 text-green-700";
+      default: return "bg-gray-100 text-gray-700";
     }
   };
 
-  const getGreeting = () => {
-    const h = currentTime.getHours();
-    if (h < 12) return "Good morning";
-    if (h < 17) return "Good afternoon";
-    return "Good evening";
-  };
-
-  if (loading) {
+  if (status === "loading" || loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
-          <p className="text-slate-400 text-sm">Loading admin dashboard...</p>
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin text-4xl mb-4">💧</div>
+          <p className="text-gray-400">Loading admin panel...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* ── Header ── */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col sm:flex-row sm:items-end justify-between gap-4"
-      >
-        <div>
-          <p className="text-xs text-slate-500 uppercase tracking-widest font-semibold mb-1">
-            {currentTime.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-          </p>
-          <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-            {getGreeting()}, Admin.
-          </h1>
-          <p className="text-slate-400 text-sm mt-1">
-            Here's what's happening with your business today.
-          </p>
+    <div className="min-h-screen bg-gray-950 text-white">
+
+      {/* Navbar */}
+      <nav className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center justify-between sticky top-0 z-40">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
+            <span className="text-xl">💧</span>
+          </div>
+          <div>
+            <h1 className="font-bold text-white">AquaPure Admin</h1>
+            <p className="text-xs text-gray-400">Management Portal</p>
+          </div>
         </div>
-        <button
-          onClick={fetchStats}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95 flex-shrink-0"
-          style={{ background: "linear-gradient(135deg,#3B82F6,#06B6D4)" }}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Refresh
-        </button>
-      </motion.div>
-
-      {/* ── Stats Cards ── */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.05 }}
-        className="grid grid-cols-2 lg:grid-cols-4 gap-4"
-      >
-        {[
-          { label: "Total Users", value: stats.totalUsers, icon: "👥", accent: "#3B82F6" },
-          { label: "Total Orders", value: stats.totalOrders, icon: "📦", accent: "#8B5CF6" },
-          { label: "Total Revenue", value: `R${stats.totalRevenue.toFixed(2)}`, icon: "💰", accent: "#10B981" },
-          { label: "Today's Revenue", value: `R${stats.todayRevenue.toFixed(2)}`, icon: "📈", accent: "#06B6D4" },
-        ].map((stat, index) => (
-          <motion.div
-            key={stat.label}
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.05 + index * 0.05 }}
-            className="rounded-xl border border-white/8 p-4"
-            style={{ background: "#111827" }}
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-gray-400 hidden md:block">
+            👤 {session?.user?.name}
+          </span>
+          <button
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm transition"
           >
-            <div className="flex items-center justify-between">
-              <span className="text-2xl">{stat.icon}</span>
-              <span className="text-xl font-bold text-white">{stat.value}</span>
+            Logout
+          </button>
+        </div>
+      </nav>
+
+      <div className="max-w-7xl mx-auto px-6 py-8">
+
+        {/* Tabs */}
+        <div className="flex gap-2 mb-8 bg-gray-900 rounded-xl p-1 w-fit">
+          {(["overview", "orders", "drivers", "customers"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-5 py-2 rounded-lg text-sm font-medium transition capitalize ${
+                tab === t
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-400 hover:text-white"
+              }`}
+            >
+              {t === "overview" ? "📊 Overview" :
+               t === "orders" ? "📦 Orders" :
+               t === "drivers" ? "🚚 Drivers" : "👥 Customers"}
+            </button>
+          ))}
+        </div>
+
+        {/* Overview Tab */}
+        {tab === "overview" && stats && (
+          <div className="space-y-8">
+
+            {/* Stats Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                { label: "Total Orders", value: stats.totalOrders, icon: "📦", color: "from-blue-600 to-blue-700" },
+                { label: "Total Revenue", value: `R${stats.totalRevenue}`, icon: "💰", color: "from-green-600 to-green-700" },
+                { label: "Total Drivers", value: stats.totalDrivers, icon: "🚚", color: "from-orange-600 to-orange-700" },
+                { label: "Total Customers", value: stats.totalCustomers, icon: "👥", color: "from-purple-600 to-purple-700" },
+              ].map((stat, i) => (
+                <motion.div
+                  key={stat.label}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.1 }}
+                  className={`bg-gradient-to-br ${stat.color} rounded-2xl p-6`}
+                >
+                  <div className="text-3xl mb-3">{stat.icon}</div>
+                  <p className="text-3xl font-bold text-white">{stat.value}</p>
+                  <p className="text-white/70 text-sm mt-1">{stat.label}</p>
+                </motion.div>
+              ))}
             </div>
-            <p className="text-xs text-slate-500 mt-1">{stat.label}</p>
-          </motion.div>
-        ))}
-      </motion.div>
 
-      {/* ── Order Status Cards ── */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="grid grid-cols-3 gap-4"
-      >
-        {[
-          { label: "Pending", value: stats.pendingOrders, color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/30" },
-          { label: "In Progress", value: stats.claimedOrders, color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/30" },
-          { label: "Delivered", value: stats.deliveredOrders, color: "text-green-400", bg: "bg-green-500/10", border: "border-green-500/30" },
-        ].map((stat, index) => (
-          <motion.div
-            key={stat.label}
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 + index * 0.05 }}
-            className={`rounded-xl border p-4 text-center ${stat.border}`}
-            style={{ background: stat.bg }}
-          >
-            <p className={`text-3xl font-bold ${stat.color}`}>{stat.value}</p>
-            <p className="text-xs text-slate-400 mt-1">{stat.label}</p>
-          </motion.div>
-        ))}
-      </motion.div>
+            {/* Order Status Breakdown */}
+            <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800">
+              <h2 className="text-lg font-bold text-white mb-6">Order Status Breakdown</h2>
+              <div className="grid grid-cols-3 gap-4">
+                {[
+                  { label: "Pending", value: stats.unclaimed, color: "bg-yellow-500", pct: stats.totalOrders ? Math.round((stats.unclaimed / stats.totalOrders) * 100) : 0 },
+                  { label: "On the way", value: stats.claimed, color: "bg-blue-500", pct: stats.totalOrders ? Math.round((stats.claimed / stats.totalOrders) * 100) : 0 },
+                  { label: "Delivered", value: stats.delivered, color: "bg-green-500", pct: stats.totalOrders ? Math.round((stats.delivered / stats.totalOrders) * 100) : 0 },
+                ].map((s) => (
+                  <div key={s.label} className="bg-gray-800 rounded-xl p-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <span className="text-gray-400 text-sm">{s.label}</span>
+                      <span className="text-white font-bold">{s.value}</span>
+                    </div>
+                    <div className="w-full bg-gray-700 rounded-full h-2">
+                      <div
+                        className={`${s.color} h-2 rounded-full transition-all`}
+                        style={{ width: `${s.pct}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">{s.pct}% of total</p>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-      {/* ── Recent Activity ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Orders */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-          className="rounded-2xl border border-white/8 overflow-hidden"
-          style={{ background: "#111827" }}
-        >
-          <div className="px-5 py-4 border-b border-white/8 flex items-center justify-between">
-            <p className="text-sm font-semibold text-white">Recent Orders</p>
-            <Link href="/admin/orders" className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
-              View all →
-            </Link>
+            {/* Quick Actions */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <button
+                onClick={() => setTab("orders")}
+                className="bg-gray-900 border border-gray-800 rounded-2xl p-6 text-left hover:border-blue-500 transition group"
+              >
+                <span className="text-3xl mb-3 block">📦</span>
+                <h3 className="font-bold text-white group-hover:text-blue-400 transition">Manage Orders</h3>
+                <p className="text-gray-400 text-sm mt-1">View and update all orders</p>
+              </button>
+              <button
+                onClick={() => setTab("drivers")}
+                className="bg-gray-900 border border-gray-800 rounded-2xl p-6 text-left hover:border-blue-500 transition group"
+              >
+                <span className="text-3xl mb-3 block">🚚</span>
+                <h3 className="font-bold text-white group-hover:text-blue-400 transition">Manage Drivers</h3>
+                <p className="text-gray-400 text-sm mt-1">View driver performance</p>
+              </button>
+              <button
+                onClick={() => setTab("customers")}
+                className="bg-gray-900 border border-gray-800 rounded-2xl p-6 text-left hover:border-blue-500 transition group"
+              >
+                <span className="text-3xl mb-3 block">👥</span>
+                <h3 className="font-bold text-white group-hover:text-blue-400 transition">Manage Customers</h3>
+                <p className="text-gray-400 text-sm mt-1">View customer accounts</p>
+              </button>
+            </div>
           </div>
-          <div className="divide-y divide-white/6">
-            {stats.recentOrders.length === 0 ? (
-              <div className="px-5 py-8 text-center text-slate-500 text-sm">
-                No orders yet
+        )}
+
+        {/* Orders Tab */}
+        {tab === "orders" && (
+          <div className="space-y-4">
+            <div className="flex flex-col md:flex-row gap-4">
+              <input
+                type="text"
+                placeholder="🔍 Search by customer name..."
+                className="flex-1 bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-blue-500"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <div className="flex gap-2">
+                {["all", "unclaimed", "claimed", "delivered"].map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setOrderFilter(s)}
+                    className={`px-4 py-2 rounded-xl text-sm font-medium transition capitalize ${
+                      orderFilter === s
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-900 text-gray-400 border border-gray-800 hover:text-white"
+                    }`}
+                  >
+                    {s === "all" ? "All" : s === "unclaimed" ? "Pending" : s === "claimed" ? "On way" : "Delivered"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {orders.length === 0 ? (
+                <div className="bg-gray-900 rounded-2xl p-12 text-center border border-gray-800">
+                  <p className="text-4xl mb-3">📭</p>
+                  <p className="text-gray-400">No orders found</p>
+                </div>
+              ) : (
+                orders.map((order) => (
+                  <motion.div
+                    key={order.id}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="bg-gray-900 rounded-2xl border border-gray-800 p-5"
+                  >
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <p className="font-bold text-white">{order.customer_name}</p>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${getStatusColor(order.delivery_status)}`}>
+                            {order.delivery_status === "unclaimed" ? "Pending" :
+                             order.delivery_status === "claimed" ? "On the way" : "Delivered"}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-400">{order.customer_email} · {order.customer_phone}</p>
+                        <p className="text-sm text-gray-500 mt-1">📍 {order.delivery_address}</p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          {new Date(order.created_at).toLocaleString()} · Order #{order.id.slice(0, 8).toUpperCase()}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <p className="text-xl font-bold text-blue-400">R{Number(order.total).toFixed(2)}</p>
+                        <select
+                          className="bg-gray-800 border border-gray-700 text-white text-sm rounded-xl px-3 py-2 outline-none"
+                          value={order.delivery_status}
+                          onChange={(e) => updateOrderStatus(order.id, e.target.value)}
+                        >
+                          <option value="unclaimed">Pending</option>
+                          <option value="claimed">On the way</option>
+                          <option value="delivered">Delivered</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Items */}
+                    <div className="mt-3 pt-3 border-t border-gray-800 flex flex-wrap gap-2">
+                      {order.items?.map((item, i) => (
+                        <span key={i} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded-lg">
+                          {item.name} × {item.quantity}
+                        </span>
+                      ))}
+                    </div>
+                  </motion.div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Drivers Tab */}
+        {tab === "drivers" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-gray-400 text-sm">{drivers.length} drivers registered</p>
+            </div>
+            {drivers.length === 0 ? (
+              <div className="bg-gray-900 rounded-2xl p-12 text-center border border-gray-800">
+                <p className="text-4xl mb-3">🚚</p>
+                <p className="text-gray-400">No drivers found</p>
               </div>
             ) : (
-              stats.recentOrders.map((order) => (
-                <div key={order.id} className="px-5 py-3 flex items-center justify-between hover:bg-white/5 transition">
-                  <div>
-                    <p className="text-sm text-white font-medium">#{order.id.slice(0, 8).toUpperCase()}</p>
-                    <p className="text-xs text-slate-500">{order.customer_name || 'Unknown'}</p>
+              drivers.map((driver) => (
+                <motion.div
+                  key={driver.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="bg-gray-900 rounded-2xl border border-gray-800 p-5"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-xl font-bold">
+                        {driver.full_name?.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="font-bold text-white">{driver.full_name}</p>
+                        <p className="text-sm text-gray-400">{driver.email}</p>
+                        <p className="text-sm text-gray-500">{driver.phone}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                      <div className="text-center hidden md:block">
+                        <p className="text-xl font-bold text-green-400">{driver.totalDeliveries}</p>
+                        <p className="text-xs text-gray-500">Delivered</p>
+                      </div>
+                      <div className="text-center hidden md:block">
+                        <p className="text-xl font-bold text-blue-400">{driver.activeOrders}</p>
+                        <p className="text-xs text-gray-500">Active</p>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        Joined {new Date(driver.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-white">R{order.total?.toFixed(2) || '0.00'}</p>
-                    <p className="text-xs text-slate-500">{new Date(order.created_at).toLocaleDateString()}</p>
-                  </div>
-                </div>
+                </motion.div>
               ))
             )}
           </div>
-        </motion.div>
+        )}
 
-        {/* Recent Users */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="rounded-2xl border border-white/8 overflow-hidden"
-          style={{ background: "#111827" }}
-        >
-          <div className="px-5 py-4 border-b border-white/8 flex items-center justify-between">
-            <p className="text-sm font-semibold text-white">Recent Users</p>
-            <Link href="/admin/users" className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
-              View all →
-            </Link>
-          </div>
-          <div className="divide-y divide-white/6">
-            {stats.recentUsers.length === 0 ? (
-              <div className="px-5 py-8 text-center text-slate-500 text-sm">
-                No users yet
+        {/* Customers Tab */}
+        {tab === "customers" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-gray-400 text-sm">{customers.length} customers registered</p>
+            </div>
+            {customers.length === 0 ? (
+              <div className="bg-gray-900 rounded-2xl p-12 text-center border border-gray-800">
+                <p className="text-4xl mb-3">👥</p>
+                <p className="text-gray-400">No customers found</p>
               </div>
             ) : (
-              stats.recentUsers.map((user) => (
-                <div key={user.id} className="px-5 py-3 flex items-center justify-between hover:bg-white/5 transition">
-                  <div>
-                    <p className="text-sm text-white font-medium">{user.full_name || 'Unknown'}</p>
-                    <p className="text-xs text-slate-500">{user.email}</p>
+              customers.map((customer) => (
+                <motion.div
+                  key={customer.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="bg-gray-900 rounded-2xl border border-gray-800 p-5"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-purple-600 rounded-xl flex items-center justify-center text-xl font-bold">
+                        {customer.full_name?.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="font-bold text-white">{customer.full_name}</p>
+                        <p className="text-sm text-gray-400">{customer.email}</p>
+                        <p className="text-sm text-gray-500">{customer.phone}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                      <div className="text-center hidden md:block">
+                        <p className="text-xl font-bold text-blue-400">{customer.totalOrders}</p>
+                        <p className="text-xs text-gray-500">Orders</p>
+                      </div>
+                      <div className="text-center hidden md:block">
+                        <p className="text-xl font-bold text-green-400">R{customer.totalSpent}</p>
+                        <p className="text-xs text-gray-500">Spent</p>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        Joined {new Date(customer.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <span className={`text-xs px-2 py-1 rounded-full ${
-                      user.role?.toLowerCase() === 'admin' 
-                        ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                        : user.role?.toLowerCase() === 'driver'
-                        ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                        : 'bg-green-500/20 text-green-400 border border-green-500/30'
-                    }`}>
-                      {user.role || 'Customer'}
-                    </span>
-                  </div>
-                </div>
+                </motion.div>
               ))
             )}
           </div>
-        </motion.div>
+        )}
       </div>
     </div>
   );

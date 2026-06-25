@@ -74,14 +74,14 @@ export async function middleware(request: NextRequest) {
   }
 
   // ── 5. Protect admin routes ──
-  if (pathname.startsWith('/admin')) {
-    if (userRole !== 'Admin') {
-      if (userRole === 'Driver') {
-        return NextResponse.redirect(new URL('/driver/dashboard', request.url));
-      }
-      return NextResponse.redirect(new URL('/dashboard', request.url));
+ if (pathname.startsWith('/admin')) {
+  if (userRole !== 'Admin') {
+    if (userRole === 'Driver') {
+      return NextResponse.redirect(new URL('/driver/dashboard', request.url));
     }
+    return NextResponse.redirect(new URL('/dashboard', request.url));
   }
+}
 
   if (pathname.startsWith('/api/admin')) {
     if (userRole !== 'Admin') {
