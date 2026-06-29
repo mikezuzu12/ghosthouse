@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import nodemailer from "nodemailer";
 import crypto from "crypto";
 
@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email is required" }, { status: 400 });
     }
 
-    const { data: user, error: userError } = await supabase
+    const { data: user, error: userError } = await supabaseAdmin
       .from("users")
       .select("id, full_name, email")
       .eq("email", email)
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     console.log("3. Token generated");
 
     // ✅ Fix — use Supabase SQL to set expiry to avoid timezone issues
-    const { error: tokenError } = await supabase.rpc("insert_reset_token", {
+    const { error: tokenError } = await supabaseAdmin.rpc("insert_reset_token", {
       p_user_id: user.id,
       p_token: token,
     });
@@ -45,17 +45,14 @@ export async function POST(req: NextRequest) {
     console.log("5. EMAIL_PASS exists:", !!process.env.EMAIL_PASS);
 
     const transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 465,
-      secure: true,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-    });
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false, // uses STARTTLS
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
     await transporter.verify();
     console.log("6. Email transporter verified ✅");

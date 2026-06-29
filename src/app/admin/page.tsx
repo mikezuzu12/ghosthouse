@@ -33,6 +33,8 @@ type Driver = {
   email: string;
   phone: string;
   created_at: string;
+  role: string;           // "Driver" | "Inactive"
+  is_blocked: boolean;    // NEW
   totalDeliveries: number;
   activeOrders: number;
 };
@@ -43,6 +45,7 @@ type Customer = {
   email: string;
   phone: string;
   created_at: string;
+  is_blocked: boolean;    // NEW
   totalOrders: number;
   totalSpent: string;
 };
@@ -124,15 +127,24 @@ export default function AdminDashboard() {
     fetchOrders();
   }
 
-  async function toggleDriver(id: number, currentRole: string) {
-    const action = currentRole === "Driver" ? "deactivate" : "activate";
-    await fetch("/api/admin/drivers", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, action }),
-    });
-    fetchDrivers();
-  }
+ async function toggleDriver(id: number, currentRole: string) {
+  const action = currentRole === "Driver" ? "deactivate" : "activate";
+  await fetch("/api/admin/drivers", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, action }),
+  });
+  fetchDrivers();
+}
+
+async function toggleBlock(id: number, isBlocked: boolean, type: "drivers" | "customers") {
+  await fetch(`/api/admin/${type}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, action: isBlocked ? "unblock" : "block" }),
+  });
+  type === "drivers" ? fetchDrivers() : fetchCustomers();
+}
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -372,103 +384,150 @@ export default function AdminDashboard() {
 
         {/* Drivers Tab */}
         {tab === "drivers" && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-gray-400 text-sm">{drivers.length} drivers registered</p>
-            </div>
-            {drivers.length === 0 ? (
-              <div className="bg-gray-900 rounded-2xl p-12 text-center border border-gray-800">
-                <p className="text-4xl mb-3">🚚</p>
-                <p className="text-gray-400">No drivers found</p>
+  <div className="space-y-4">
+    <div className="flex items-center justify-between mb-2">
+      <p className="text-gray-400 text-sm">{drivers.length} drivers registered</p>
+    </div>
+    {drivers.length === 0 ? (
+      <div className="bg-gray-900 rounded-2xl p-12 text-center border border-gray-800">
+        <p className="text-4xl mb-3">🚚</p>
+        <p className="text-gray-400">No drivers found</p>
+      </div>
+    ) : (
+      drivers.map((driver) => (
+        <motion.div
+          key={driver.id}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="bg-gray-900 rounded-2xl border border-gray-800 p-5"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl font-bold ${
+                driver.role === "Inactive" ? "bg-gray-600" : "bg-blue-600"
+              }`}>
+                {driver.full_name?.charAt(0).toUpperCase()}
               </div>
-            ) : (
-              drivers.map((driver) => (
-                <motion.div
-                  key={driver.id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="bg-gray-900 rounded-2xl border border-gray-800 p-5"
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="font-bold text-white">{driver.full_name}</p>
+                  {driver.role === "Inactive" && (
+                    <span className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">Inactive</span>
+                  )}
+                  {driver.is_blocked && (
+                    <span className="text-xs bg-red-900 text-red-400 px-2 py-0.5 rounded-full">Blocked</span>
+                  )}
+                </div>
+                <p className="text-sm text-gray-400">{driver.email}</p>
+                <p className="text-sm text-gray-500">{driver.phone}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-center hidden md:block">
+                <p className="text-xl font-bold text-green-400">{driver.totalDeliveries}</p>
+                <p className="text-xs text-gray-500">Delivered</p>
+              </div>
+              <div className="text-center hidden md:block">
+                <p className="text-xl font-bold text-blue-400">{driver.activeOrders}</p>
+                <p className="text-xs text-gray-500">Active</p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => toggleBlock(driver.id, driver.is_blocked, "drivers")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    driver.is_blocked
+                      ? "bg-green-700 hover:bg-green-600 text-white"
+                      : "bg-red-700 hover:bg-red-600 text-white"
+                  }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-xl font-bold">
-                        {driver.full_name?.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="font-bold text-white">{driver.full_name}</p>
-                        <p className="text-sm text-gray-400">{driver.email}</p>
-                        <p className="text-sm text-gray-500">{driver.phone}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-6">
-                      <div className="text-center hidden md:block">
-                        <p className="text-xl font-bold text-green-400">{driver.totalDeliveries}</p>
-                        <p className="text-xs text-gray-500">Delivered</p>
-                      </div>
-                      <div className="text-center hidden md:block">
-                        <p className="text-xl font-bold text-blue-400">{driver.activeOrders}</p>
-                        <p className="text-xs text-gray-500">Active</p>
-                      </div>
-                      <p className="text-xs text-gray-500">
-                        Joined {new Date(driver.created_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
-                </motion.div>
-              ))
-            )}
+                  {driver.is_blocked ? "Unblock" : "Block"}
+                </button>
+                <button
+                  onClick={() => toggleDriver(driver.id, driver.role)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    driver.role === "Inactive"
+                      ? "bg-blue-700 hover:bg-blue-600 text-white"
+                      : "bg-gray-700 hover:bg-gray-600 text-white"
+                  }`}
+                >
+                  {driver.role === "Inactive" ? "Activate" : "Deactivate"}
+                </button>
+              </div>
+            </div>
           </div>
-        )}
+        </motion.div>
+      ))
+    )}
+  </div>
+)}
+        
 
         {/* Customers Tab */}
-        {tab === "customers" && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-gray-400 text-sm">{customers.length} customers registered</p>
-            </div>
-            {customers.length === 0 ? (
-              <div className="bg-gray-900 rounded-2xl p-12 text-center border border-gray-800">
-                <p className="text-4xl mb-3">👥</p>
-                <p className="text-gray-400">No customers found</p>
+      {tab === "customers" && (
+  <div className="space-y-4">
+    <div className="flex items-center justify-between mb-2">
+      <p className="text-gray-400 text-sm">{customers.length} customers registered</p>
+    </div>
+    {customers.length === 0 ? (
+      <div className="bg-gray-900 rounded-2xl p-12 text-center border border-gray-800">
+        <p className="text-4xl mb-3">👥</p>
+        <p className="text-gray-400">No customers found</p>
+      </div>
+    ) : (
+      customers.map((customer) => (
+        <motion.div
+          key={customer.id}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="bg-gray-900 rounded-2xl border border-gray-800 p-5"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl font-bold ${
+                customer.is_blocked ? "bg-red-900" : "bg-purple-600"
+              }`}>
+                {customer.full_name?.charAt(0).toUpperCase()}
               </div>
-            ) : (
-              customers.map((customer) => (
-                <motion.div
-                  key={customer.id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="bg-gray-900 rounded-2xl border border-gray-800 p-5"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-purple-600 rounded-xl flex items-center justify-center text-xl font-bold">
-                        {customer.full_name?.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="font-bold text-white">{customer.full_name}</p>
-                        <p className="text-sm text-gray-400">{customer.email}</p>
-                        <p className="text-sm text-gray-500">{customer.phone}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-6">
-                      <div className="text-center hidden md:block">
-                        <p className="text-xl font-bold text-blue-400">{customer.totalOrders}</p>
-                        <p className="text-xs text-gray-500">Orders</p>
-                      </div>
-                      <div className="text-center hidden md:block">
-                        <p className="text-xl font-bold text-green-400">R{customer.totalSpent}</p>
-                        <p className="text-xs text-gray-500">Spent</p>
-                      </div>
-                      <p className="text-xs text-gray-500">
-                        Joined {new Date(customer.created_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
-                </motion.div>
-              ))
-            )}
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="font-bold text-white">{customer.full_name}</p>
+                  {customer.is_blocked && (
+                    <span className="text-xs bg-red-900 text-red-400 px-2 py-0.5 rounded-full">Blocked</span>
+                  )}
+                </div>
+                <p className="text-sm text-gray-400">{customer.email}</p>
+                <p className="text-sm text-gray-500">{customer.phone}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-center hidden md:block">
+                <p className="text-xl font-bold text-blue-400">{customer.totalOrders}</p>
+                <p className="text-xs text-gray-500">Orders</p>
+              </div>
+              <div className="text-center hidden md:block">
+                <p className="text-xl font-bold text-green-400">R{customer.totalSpent}</p>
+                <p className="text-xs text-gray-500">Spent</p>
+              </div>
+              <button
+                onClick={() => toggleBlock(customer.id, customer.is_blocked, "customers")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  customer.is_blocked
+                    ? "bg-green-700 hover:bg-green-600 text-white"
+                    : "bg-red-700 hover:bg-red-600 text-white"
+                }`}
+              >
+                {customer.is_blocked ? "Unblock" : "Block"}
+              </button>
+              <p className="text-xs text-gray-500">
+                Joined {new Date(customer.created_at).toLocaleDateString()}
+              </p>
+            </div>
           </div>
-        )}
+        </motion.div>
+      ))
+    )}
+  </div>
+)}
       </div>
     </div>
   );
