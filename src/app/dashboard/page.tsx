@@ -33,6 +33,15 @@ type Order = {
   created_at: string;
 };
 
+type Subscription = {
+  id: string;
+  plan_name: string;
+  monthly_price: number;
+  status: string;
+  billing_cycle: string;
+  start_date: string;
+};
+
 // ── Navbar Chat Popover ───────────────────────────────────────────────────────
 function NavbarChat({ orderId, userName }: { orderId: string; userName?: string }) {
   const [open, setOpen] = useState(false);
@@ -89,6 +98,7 @@ function StatusPill({ status }: { status: string }) {
     claimed:    { label: "Driver Assigned", color: "text-blue-400 bg-blue-500/10 border-blue-500/30",    dot: "bg-blue-400" },
     in_transit: { label: "On the Way",      color: "text-amber-400 bg-amber-500/10 border-amber-500/30", dot: "bg-amber-400" },
     delivered:  { label: "Delivered",       color: "text-green-400 bg-green-500/10 border-green-500/30", dot: "bg-green-400" },
+    unclaimed:  { label: "Pending",         color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/30", dot: "bg-yellow-400" },
   };
   const s = map[status] ?? { label: status, color: "text-slate-400 bg-white/5 border-white/10", dot: "bg-slate-400" };
   return (
@@ -101,20 +111,18 @@ function StatusPill({ status }: { status: string }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  // ── ALL HOOKS MUST BE CALLED AT THE TOP LEVEL ──
-  // ✅ All hooks called before any conditional returns
   const router = useRouter();
   const { data: session, status } = useSession();
   const { isLoading, isAuthenticated } = useAuth({ requiredRole: 'customer' });
-  
+
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [driverLocation, setDriverLocation] = useState<Location | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
 
-  // ── All useEffect hooks at the top level ──
   useEffect(() => {
     const t = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(t);
@@ -126,6 +134,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (status !== "authenticated") return;
+
+    // Fetch orders
     fetch("/api/orders/my-orders")
       .then((r) => r.json())
       .then((data) => {
@@ -136,13 +146,20 @@ export default function Dashboard() {
         setRecentOrders(data.orders?.slice(0, 5) || []);
       })
       .catch(() => setError("Failed to load orders."));
+
+    // Fetch active subscription
+    fetch("/api/subscriptions/my-subscription")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.subscription) setSubscription(data.subscription);
+      })
+      .catch(() => {}); // silent fail — subscription is optional
   }, [status]);
 
-  // ── LIVE driver location (replaces the old 10s polling) ──
+  // Live driver location via Supabase Realtime
   useEffect(() => {
     if (!activeOrder) return;
 
-    // initial snapshot so the map isn't blank while waiting for the first live update
     supabase
       .from("driver_locations")
       .select("*")
@@ -152,7 +169,6 @@ export default function Dashboard() {
         if (data) setDriverLocation(data as Location);
       });
 
-    // subscribe to live changes for this order only
     const channel = supabase
       .channel(`location-${activeOrder.id}`)
       .on(
@@ -167,14 +183,9 @@ export default function Dashboard() {
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [activeOrder]);
 
-  // ── NOW it's safe to do conditional returns (after all hooks) ──
-  
-  // Auth check (after all hooks)
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#0A0E1A" }}>
@@ -186,17 +197,7 @@ export default function Dashboard() {
     );
   }
 
-  if (!isAuthenticated) {
-    return null;
-  }
-
-  // ── Rest of your dashboard code ──
-  const getGreeting = () => {
-    const h = currentTime.getHours();
-    if (h < 12) return "Good morning";
-    if (h < 17) return "Good afternoon";
-    return "Good evening";
-  };
+  if (!isAuthenticated) return null;
 
   if (status === "loading") {
     return (
@@ -208,6 +209,13 @@ export default function Dashboard() {
       </div>
     );
   }
+
+  const getGreeting = () => {
+    const h = currentTime.getHours();
+    if (h < 12) return "Good morning";
+    if (h < 17) return "Good afternoon";
+    return "Good evening";
+  };
 
   const user = session?.user as any;
 
@@ -233,7 +241,6 @@ export default function Dashboard() {
 
           <div className="flex items-center gap-2">
             <NotificationBell />
-            
             {activeOrder && <NavbarChat orderId={activeOrder.id} userName={user?.name} />}
             <div className="flex items-center gap-2 pl-2 border-l border-white/10">
               <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
@@ -292,14 +299,66 @@ export default function Dashboard() {
           </Link>
         </motion.div>
 
+        {/* ── Subscription Banner ── */}
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }}>
+          {subscription ? (
+            // Active subscription card
+            <div className="rounded-2xl border border-emerald-500/20 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              style={{ background: "rgba(16,185,129,0.06)" }}>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
+                  style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.25)" }}>
+                  💧
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-white">{subscription.plan_name} Plan</p>
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20">
+                      Active
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    R{subscription.monthly_price}/month · {subscription.billing_cycle} billing
+                  </p>
+                </div>
+              </div>
+              <Link href="/subscriptions"
+                className="text-xs font-medium text-emerald-400 hover:text-emerald-300 transition px-4 py-2 rounded-lg border border-emerald-500/20 hover:border-emerald-500/40 flex-shrink-0"
+                style={{ background: "rgba(16,185,129,0.08)" }}>
+                Manage Plan →
+              </Link>
+            </div>
+          ) : (
+            // No subscription — prompt to subscribe
+            <div className="rounded-2xl border border-white/8 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              style={{ background: "linear-gradient(90deg, rgba(59,130,246,0.06) 0%, rgba(6,182,212,0.03) 100%)" }}>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
+                  style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.2)" }}>
+                  🔔
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">Never run out of water</p>
+                  <p className="text-xs text-slate-400">Subscribe from R299/month and get automatic monthly deliveries.</p>
+                </div>
+              </div>
+              <Link href="/subscriptions"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition hover:opacity-90 flex-shrink-0"
+                style={{ background: "linear-gradient(135deg,#3B82F6,#06B6D4)" }}>
+                View Plans →
+              </Link>
+            </div>
+          )}
+        </motion.div>
+
         {/* Quick nav */}
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
           className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { icon: "🛒", label: "Place Order",    href: "/customer/orders",    accent: "#3B82F6" },
-            { icon: "📋", label: "Order History",  href: "/customer/fullorders", accent: "#8B5CF6" },
-            { icon: "📍", label: "Track Delivery", href: "#",                   accent: "#06B6D4" },
-            { icon: "🎧", label: "Support",         href: "#",                   accent: "#10B981" },
+            { icon: "🛒", label: "Place Order",     href: "/customer/orders",     accent: "#3B82F6" },
+            { icon: "📋", label: "Order History",   href: "/customer/fullorders", accent: "#8B5CF6" },
+            { icon: "💧", label: "My Subscription", href: "/subscriptions",       accent: "#06B6D4" },
+            { icon: "🎧", label: "Support",          href: "#",                    accent: "#10B981" },
           ].map((item, i) => (
             <motion.div key={item.label} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 + i * 0.04 }}>
               <Link href={item.href}>
@@ -320,7 +379,6 @@ export default function Dashboard() {
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
             className="rounded-2xl border border-white/8 overflow-hidden" style={{ background: "#111827" }}>
 
-            {/* Banner */}
             <div className="px-5 py-4 border-b border-white/8 flex flex-wrap items-center justify-between gap-3"
               style={{ background: "linear-gradient(90deg, rgba(59,130,246,0.1) 0%, rgba(6,182,212,0.05) 100%)" }}>
               <div className="flex items-center gap-3">
@@ -398,7 +456,6 @@ export default function Dashboard() {
 
               {/* Right column */}
               <div className="space-y-4">
-                {/* Order details */}
                 <div className="rounded-xl border border-white/8 p-4 space-y-3" style={{ background: "rgba(255,255,255,0.03)" }}>
                   <p className="text-xs text-slate-500 uppercase tracking-widest font-semibold">Order Details</p>
                   {[
@@ -414,7 +471,6 @@ export default function Dashboard() {
                   ))}
                 </div>
 
-                {/* Chat toggle */}
                 <button
                   onClick={() => setChatOpen((v) => !v)}
                   className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-white/8 hover:border-blue-500/30 transition-all group"
@@ -447,7 +503,6 @@ export default function Dashboard() {
                   )}
                 </AnimatePresence>
 
-                {/* Actions */}
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     { icon: "⭐", label: "Rate Driver" },
