@@ -9,6 +9,7 @@ import ClientOnlyMap from "@/app/components/ClientOnlyMap";
 import { motion, AnimatePresence } from "framer-motion";
 import NotificationBell from "@/app/components/NotificationBell";
 import { useAuth } from '@/hook/useAuth';
+import { supabase } from "@/lib/supabase";
 
 type Location = {
   id: string;
@@ -137,16 +138,38 @@ export default function Dashboard() {
       .catch(() => setError("Failed to load orders."));
   }, [status]);
 
+  // ── LIVE driver location (replaces the old 10s polling) ──
   useEffect(() => {
     if (!activeOrder) return;
-    const fetchLoc = () =>
-      fetch(`/api/drivers/location?order_id=${activeOrder.id}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => d?.location && setDriverLocation(d.location))
-        .catch(() => {});
-    fetchLoc();
-    const iv = setInterval(fetchLoc, 10000);
-    return () => clearInterval(iv);
+
+    // initial snapshot so the map isn't blank while waiting for the first live update
+    supabase
+      .from("driver_locations")
+      .select("*")
+      .eq("order_id", activeOrder.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) setDriverLocation(data as Location);
+      });
+
+    // subscribe to live changes for this order only
+    const channel = supabase
+      .channel(`location-${activeOrder.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "driver_locations",
+          filter: `order_id=eq.${activeOrder.id}`,
+        },
+        (payload) => setDriverLocation(payload.new as Location)
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [activeOrder]);
 
   // ── NOW it's safe to do conditional returns (after all hooks) ──
